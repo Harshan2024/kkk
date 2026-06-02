@@ -1,5 +1,33 @@
+/**
+ * api.ts — CarbonTracker Frontend API Service
+ * =============================================
+ * LOCKED: Core API client. Do not modify without team review.
+ *
+ * All requests include:
+ * - 15-second AbortController timeout
+ * - Structured ApiResponse<T> envelope
+ * - Per-endpoint typed return values
+ * - Graceful degradation on failure (never throws unless caller opts in)
+ */
+
+import logger from "../utils/logger";
+import {
+  sanitizeSummary,
+  sanitizeInsights,
+  sanitizeActivities,
+  sanitizeAchievements,
+  sanitizeForecast,
+  sanitizeChatMessages,
+} from "../utils/validators";
+
 const HOST = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const BASE_URL = HOST.endsWith("/api/v1") ? HOST : `${HOST}/api/v1`;
+
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TYPE DEFINITIONS
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface ActivityMetadata {
   calculation_type?: string;
@@ -21,6 +49,8 @@ export interface ActivityMetadata {
   emission_factor?: number;
   source?: string;
   region_applied?: string;
+  error?: string;
+  fallback?: boolean;
 }
 
 export interface Activity {
@@ -60,6 +90,41 @@ export interface DashboardSummary {
   breakdown: CategoryBreakdown[];
   trends: TrendData[];
   achievements_count: number;
+  habit_cards?: unknown[];
+  xp?: number;
+  level?: number;
+  level_name?: string;
+  progress_pct?: number;
+  streaks?: {
+    current_streak: number;
+    longest_streak: number;
+    carbon_streak: number;
+    score_streak: number;
+    monthly_performance: number[];
+  };
+  quests?: {
+    id: string;
+    name: string;
+    description: string;
+    progress: number;
+    max: number;
+    xp: number;
+    icon: string;
+    color: string;
+  }[];
+  ai_dashboard?: {
+    top_emission_source: string;
+    weekly_trend: string;
+    behavior_change: string;
+    predicted_monthly_emissions: number;
+    biggest_improvement_area: string;
+    personalized_sustainability_summary: string;
+  };
+  insight_feed?: {
+    text: string;
+    timestamp: string;
+    type: string;
+  }[];
 }
 
 export interface AIInsight {
@@ -124,41 +189,176 @@ export interface ObservabilityMetrics {
   avg_nlp_confidence?: number;
 }
 
+export interface HealthStatus {
+  backend: string;
+  mode?: string;
+  database: string;
+  statistics_api?: string;
+  status?: string;
+}
+
+export interface SystemHealth {
+  database: { status: string; connected?: boolean; error?: string };
+  ai: { status: string; subsystems?: Record<string, string> };
+  ocr: { status: string; error?: string };
+  iot: { status: string; message?: string };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INTERNAL FETCH HELPER
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Internal — makes a fetch with AbortController timeout + duration logging. */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = DEFAULT_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const startTime = performance.now();
+
+  // Extract endpoint path for clean logging (strip base URL)
+  const endpoint = url.replace(/^https?:\/\/[^/]+/, "");
+
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timer);
+    const duration = Math.round(performance.now() - startTime);
+    logger.info(
+      "API",
+      `[${options.method || "GET"}] ${endpoint} — ${response.status} — ${duration}ms`
+    );
+    return response;
+  } catch (err: unknown) {
+    clearTimeout(timer);
+    const duration = Math.round(performance.now() - startTime);
+    if (err instanceof Error && err.name === "AbortError") {
+      logger.warn("API", `[TIMEOUT] ${endpoint} — aborted after ${duration}ms (limit: ${timeoutMs}ms)`);
+      throw new Error(`Request timed out. Please try again. (${timeoutMs / 1000}s limit)`);
+    }
+    logger.error("API", `[FAIL] ${endpoint} — network error after ${duration}ms`, err);
+    throw err;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RETRY HELPER — exponential backoff, network errors only
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Retries a fetch fn with exponential backoff.
+ * Only retries on network/timeout errors, NOT on 4xx HTTP errors.
+ * max retries = 2, delays: 1s → 2s
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  endpoint: string,
+  maxRetries = 2
+): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : "";
+      // Don't retry: validation/auth/bad-request errors
+      const isHttp4xx = /HTTP 4\d\d/.test(msg);
+      if (isHttp4xx || attempt === maxRetries) break;
+      const delayMs = 1000 * Math.pow(2, attempt); // 1s, then 2s
+      logger.warn(
+        "API",
+        `[RETRY ${attempt + 1}/${maxRetries}] ${endpoint} — retrying in ${delayMs}ms`
+      );
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API SERVICE CLASS
+// ─────────────────────────────────────────────────────────────────────────────
+
 class ApiService {
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  /**
+   * Core request method — includes:
+   * - AbortController timeout (default 15s, configurable per endpoint)
+   * - Exponential backoff retry for GET requests (max 2 retries: 1s → 2s)
+   * - Duration logging via fetchWithTimeout
+   * - Envelope unwrapping for { success, data, error }
+   * - No retry on 4xx (bad request, auth, validation errors)
+   */
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit = {},
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    retries = 2
+  ): Promise<T> {
     const url = `${BASE_URL}${endpoint}`;
-    
+
     const headers = new Headers(options.headers || {});
-    if (options.body && !headers.has("Content-Type")) {
+    if (options.body && !headers.has("Content-Type") && !(options.body instanceof FormData)) {
       headers.set("Content-Type", "application/json");
     }
-    
-    const response = await fetch(url, { ...options, headers });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorDetail = "API Request failed";
+
+    const doFetch = async (): Promise<T> => {
+      let response: Response;
       try {
-        const errJson = JSON.parse(errorText);
-        errorDetail = errJson.detail || errorDetail;
+        response = await fetchWithTimeout(url, { ...options, headers }, timeoutMs);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Network error";
+        throw new Error(msg);
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        let errorDetail = `HTTP ${response.status}`;
+        try {
+          const errJson = JSON.parse(errorText);
+          errorDetail = errJson.detail || errJson.error || errorDetail;
+        } catch {
+          errorDetail = errorText || errorDetail;
+        }
+        throw new Error(errorDetail);
+      }
+
+      let result: unknown;
+      try {
+        result = await response.json();
       } catch {
-        errorDetail = errorText || errorDetail;
+        throw new Error("Invalid JSON response from server");
       }
-      throw new Error(errorDetail);
-    }
-    
-    const result = await response.json();
-    if (result && typeof result === "object" && "success" in result && "data" in result) {
-      if (!result.success) {
-        throw new Error(result.error || "API Request failed");
+
+      // Unwrap the { success, data, error } envelope
+      if (result && typeof result === "object" && "success" in result && "data" in result) {
+        const envelope = result as { success: boolean; data: unknown; error?: string };
+        if (!envelope.success) {
+          const errMsg = envelope.error || "API returned success=false";
+          logger.warn("ApiService", `API success=false at ${endpoint}`, { error: errMsg });
+          throw new Error(errMsg);
+        }
+        return envelope.data as T;
       }
-      return result.data as T;
-    }
-    return result as T;
+
+      return result as T;
+    };
+
+    // Only retry safe idempotent GET requests
+    const method = (options.method || "GET").toUpperCase();
+    const shouldRetry = method === "GET" && retries > 0;
+    return shouldRetry ? withRetry(doFetch, endpoint, retries) : doFetch();
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // ACTIVITY ENDPOINTS
+  // ─────────────────────────────────────────────────────────────────────────
+
   async parseActivity(text: string, region = "Global"): Promise<ParseResult> {
-    return this.request<ParseResult>(`/activities/parse?text=${encodeURIComponent(text)}&region=${encodeURIComponent(region)}`);
+    return this.request<ParseResult>(
+      `/activities/parse?text=${encodeURIComponent(text)}&region=${encodeURIComponent(region)}`
+    );
   }
 
   async logActivity(text: string, username = "demo_user", region = "Global"): Promise<Activity> {
@@ -169,91 +369,173 @@ class ApiService {
   }
 
   async getActivities(username = "demo_user", limit = 20, offset = 0): Promise<Activity[]> {
-    return this.request<Activity[]>(`/activities?username=${username}&limit=${limit}&offset=${offset}`);
+    const raw = await this.request<unknown>(
+      `/activities?username=${username}&limit=${limit}&offset=${offset}`
+    );
+    return sanitizeActivities(raw);
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // DASHBOARD ENDPOINTS
+  // ─────────────────────────────────────────────────────────────────────────
+
   async getDashboardSummary(username = "demo_user"): Promise<DashboardSummary> {
-    return this.request<DashboardSummary>(`/dashboard/summary?username=${username}`);
+    const raw = await this.request<unknown>(`/dashboard/summary?username=${username}`);
+    return sanitizeSummary(raw);
   }
 
   async getInsights(username = "demo_user"): Promise<AIInsight[]> {
-    return this.request<AIInsight[]>(`/insights?username=${username}`);
+    const raw = await this.request<unknown>(`/insights?username=${username}`);
+    return sanitizeInsights(raw);
   }
 
   async getAchievements(username = "demo_user"): Promise<Achievement[]> {
-    return this.request<Achievement[]>(`/achievements?username=${username}`);
+    const raw = await this.request<unknown>(`/achievements?username=${username}`);
+    return sanitizeAchievements(raw);
   }
 
-  async postChat(message: string, username = "demo_user"): Promise<{ response: string }> {
-    return this.request<{ response: string }>("/chat", {
-      method: "POST",
-      body: JSON.stringify({ message, username }),
-    });
+  // ─────────────────────────────────────────────────────────────────────────
+  // CHAT ENDPOINTS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async postChat(
+    message: string,
+    username = "demo_user",
+    timeoutMs = 30_000
+  ): Promise<{ response: string }> {
+    return this.request<{ response: string }>(
+      "/chat",
+      { method: "POST", body: JSON.stringify({ message, username }) },
+      timeoutMs
+    );
   }
 
   async getChatHistory(username = "demo_user"): Promise<ChatMessage[]> {
-    return this.request<ChatMessage[]>(`/chat/history?username=${username}`);
+    const raw = await this.request<unknown>(`/chat/history?username=${username}`);
+    return sanitizeChatMessages(raw);
   }
 
-  async getForecast(username = "demo_user", steps = 30, model = "prophet"): Promise<ForecastData[]> {
-    return this.request<ForecastData[]>(`/analytics/forecast?username=${username}&steps=${steps}&model=${model}`);
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // ANALYTICS & OBSERVABILITY
+  // ─────────────────────────────────────────────────────────────────────────
 
-  async uploadMultimodal(file: File, username = "demo_user", region = "Global"): Promise<any> {
-    const formData = new FormData();
-    formData.append("file", file);
-    
-    const url = `${BASE_URL}/activities/upload-multimodal?username=${encodeURIComponent(username)}&region=${encodeURIComponent(region)}`;
-    const response = await fetch(url, {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || "File upload failed");
-    }
-
-    const result = await response.json();
-    if (result && typeof result === "object" && "success" in result && "data" in result) {
-      if (!result.success) {
-        throw new Error(result.error || "File upload failed");
-      }
-      return result.data;
-    }
-    return result;
+  async getForecast(
+    username = "demo_user",
+    steps = 30,
+    model = "prophet"
+  ): Promise<ForecastData[]> {
+    const raw = await this.request<unknown>(
+      `/analytics/forecast?username=${username}&steps=${steps}&model=${model}`
+    );
+    return sanitizeForecast(raw);
   }
 
   async getObservabilityMetrics(username = "demo_user"): Promise<ObservabilityMetrics> {
     return this.request<ObservabilityMetrics>(`/observability/metrics?username=${username}`);
   }
 
-  async correctActivity(original_text: string, corrected_text: string, category = "nlp_parse", username = "demo_user"): Promise<any> {
-    return this.request<any>("/activities/correct", {
+  async correctActivity(
+    original_text: string,
+    corrected_text: string,
+    category = "nlp_parse",
+    username = "demo_user"
+  ): Promise<unknown> {
+    return this.request<unknown>("/activities/correct", {
       method: "POST",
       body: JSON.stringify({ original_text, corrected_text, category, username }),
     });
   }
 
-  async seedDatabase(username = "demo_user"): Promise<{ status: string; message: string }> {
-    return this.request<{ status: string; message: string }>(`/seed?username=${username}`, {
-      method: "POST",
-    });
+  // ─────────────────────────────────────────────────────────────────────────
+  // MULTIMODAL UPLOAD
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async uploadMultimodal(
+    file: File,
+    username = "demo_user",
+    region = "Global"
+  ): Promise<unknown> {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const url = `${BASE_URL}/activities/upload-multimodal?username=${encodeURIComponent(username)}&region=${encodeURIComponent(region)}`;
+
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(url, { method: "POST", body: formData }, 60_000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      logger.error("ApiService", "Multimodal upload network error", { error: msg });
+      throw new Error(msg);
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new Error(errorText || "File upload failed");
+    }
+
+    const result = await response.json().catch(() => ({}));
+    if (result && typeof result === "object" && "success" in result) {
+      const env = result as { success: boolean; data: unknown; error?: string };
+      if (!env.success) throw new Error(env.error || "Upload failed");
+      return env.data;
+    }
+    return result;
   }
 
-  async checkHealth(): Promise<{ backend: string; database: string; status: string }> {
+  // ─────────────────────────────────────────────────────────────────────────
+  // DATABASE SEED
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async seedDatabase(username = "demo_user"): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>(
+      `/seed?username=${username}`,
+      { method: "POST" },
+      60_000
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // HEALTH CHECKS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async checkHealth(): Promise<HealthStatus> {
     try {
-      const response = await fetch(`${HOST}/health`);
-      if (!response.ok) throw new Error("Health check returned bad response");
+      const response = await fetchWithTimeout(`${HOST}/health`, {}, 5_000);
+      if (!response.ok) throw new Error(`Health check ${response.status}`);
       const result = await response.json();
-      if (result && typeof result === "object" && "success" in result && "data" in result) {
-        return result.data;
-      }
-      return result;
+      if (result && typeof result === "object" && "data" in result) return result.data as HealthStatus;
+      return result as HealthStatus;
     } catch (err) {
+      logger.warn("ApiService", "Health check failed", { error: err });
       throw new Error("Unable to contact backend server");
     }
+  }
+
+  async getSystemHealth(): Promise<SystemHealth> {
+    const [database, ai, ocr, iot] = await Promise.allSettled([
+      fetchWithTimeout(`${HOST}/api/health/database`, {}, 5_000)
+        .then((r) => r.json())
+        .catch(() => ({ status: "error" })),
+      fetchWithTimeout(`${HOST}/api/health/ai`, {}, 5_000)
+        .then((r) => r.json())
+        .catch(() => ({ status: "error" })),
+      fetchWithTimeout(`${HOST}/api/health/ocr`, {}, 5_000)
+        .then((r) => r.json())
+        .catch(() => ({ status: "error" })),
+      fetchWithTimeout(`${HOST}/api/health/iot`, {}, 5_000)
+        .then((r) => r.json())
+        .catch(() => ({ status: "offline" })),
+    ]);
+
+    return {
+      database: database.status === "fulfilled" ? database.value : { status: "error" },
+      ai: ai.status === "fulfilled" ? ai.value : { status: "error" },
+      ocr: ocr.status === "fulfilled" ? ocr.value : { status: "error" },
+      iot: iot.status === "fulfilled" ? iot.value : { status: "offline" },
+    };
   }
 }
 
 export const api = new ApiService();
+export default api;

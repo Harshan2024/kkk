@@ -72,10 +72,34 @@ export default function DashboardStats({ summary, xp = 150, level = 1 }: Dashboa
   const strokeDashoffset = circumference - (Math.min(100, Math.max(0, current_score)) / 100) * circumference;
 
   // XP level parameters
-  const nextLevelXp = level * 200;
-  const currentLevelBase = (level - 1) * 200;
-  const xpInCurrentLevel = xp - currentLevelBase;
-  const levelProgressPct = Math.min(100, Math.max(0, (xpInCurrentLevel / 200) * 100));
+  const LEVEL_NAMES = [
+    "",
+    "Eco Beginner",
+    "Eco Explorer",
+    "Eco Guardian",
+    "Climate Champion",
+    "Sustainability Leader",
+    "Carbon Warrior",
+    "Net-Zero Master"
+  ];
+  const LEVEL_THRESHOLDS = [
+    { min: 0, max: 250 },
+    { min: 250, max: 650 },
+    { min: 650, max: 1250 },
+    { min: 1250, max: 2250 },
+    { min: 2250, max: 3750 },
+    { min: 3750, max: 5750 },
+    { min: 5750, max: 1000000 }
+  ];
+  
+  const safeLvl = Math.min(7, Math.max(1, level));
+  const currentLvlInfo = LEVEL_THRESHOLDS[safeLvl - 1] || LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1];
+  const currentLevelBase = currentLvlInfo.min;
+  const nextLevelXp = currentLvlInfo.max;
+  const xpInCurrentLevel = Math.max(0, xp - currentLevelBase);
+  const range = nextLevelXp - currentLevelBase;
+  const levelProgressPct = summary?.progress_pct ?? (range > 0 ? Math.min(100, Math.max(0, (xpInCurrentLevel / range) * 100)) : 100);
+  const currentLevelName = summary?.level_name ?? LEVEL_NAMES[safeLvl] ?? "Net-Zero Master";
 
   // Extract emissions trend array for sparklines
   const emissionsHistory = trends ? trends.map(t => t.emissions) : [0.5, 0.8, 0.4, today_emissions];
@@ -194,7 +218,7 @@ export default function DashboardStats({ summary, xp = 150, level = 1 }: Dashboa
               XP / Level
             </span>
             <div className="text-xl font-black text-purple-400 leading-none mt-1.5 font-sans">
-              {xp} XP <span className="text-[10px] font-semibold text-stone-550 uppercase">• L{level}</span>
+              {xp} XP <span className="text-[9px] font-semibold text-stone-550 uppercase">• {currentLevelName}</span>
             </div>
           </div>
         </div>
@@ -207,8 +231,8 @@ export default function DashboardStats({ summary, xp = 150, level = 1 }: Dashboa
             ></div>
           </div>
           <div className="text-[8px] font-extrabold uppercase text-stone-550 tracking-wider flex justify-between">
-            <span>{xpInCurrentLevel} XP In L{level}</span>
-            <span>{200 - xpInCurrentLevel} XP to Level {level + 1}</span>
+            <span>{xpInCurrentLevel} XP In L{safeLvl}</span>
+            <span>{safeLvl >= 7 ? "Max Level" : `${Math.max(0, nextLevelXp - xp)} XP to Level ${safeLvl + 1}`}</span>
           </div>
         </div>
       </motion.div>

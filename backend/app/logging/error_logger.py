@@ -1,15 +1,13 @@
-import logging
 import traceback
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-
-logger = logging.getLogger("carbontracker.errors")
+from app.utils.logger import log_structured_error
 
 def setup_error_logging(app: FastAPI):
     """
     Registers a global exception handler to catch all unhandled errors,
-    log full traceback details, request payload, and endpoint paths,
-    and return standardized frontend-safe error structures.
+    log full traceback details to structured log,
+    and return standardized user-safe error responses.
     """
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
@@ -23,27 +21,22 @@ def setup_error_logging(app: FastAPI):
             if body:
                 payload = body.decode("utf-8", errors="ignore")
         except Exception as e:
-            logger.error(f"Failed to read request body payload: {str(e)}")
+            pass
             
-        tb = traceback.format_exc()
-        
-        # Centralized logging of the exception
-        logger.error(
-            f"--- 500 INTERNAL SERVER ERROR INTERCEPTED ---\n"
-            f"Endpoint: {endpoint}\n"
-            f"Method: {method}\n"
-            f"Payload: {payload}\n"
-            f"Error Type: {type(exc).__name__}\n"
-            f"Error Details: {str(exc)}\n"
-            f"Traceback:\n{tb}"
+        # Log structured error message
+        log_structured_error(
+            service="global_exception_handler",
+            severity="error",
+            message=f"Unhandled exception intercept on {method} {endpoint}. Payload: {payload}. Error: {str(exc)}",
+            error=exc
         )
         
-        # Return standard API structure
+        # Return standardized frontend-safe error envelope
         return JSONResponse(
             status_code=500,
             content={
                 "success": False,
                 "data": {},
-                "error": f"Internal Server Error: {str(exc)}"
+                "error": "An unexpected internal error occurred. Please try again later."
             }
         )

@@ -3,12 +3,19 @@
 import React from "react";
 import { Rocket, Lock, Shield, Check } from "lucide-react";
 import { motion } from "framer-motion";
+import { useAIStore } from "../stores/aiStore";
 
 interface StreakFooterProps {
-  streak: number;
+  streak?: number;
 }
 
 export default function StreakFooter({ streak = 1 }: StreakFooterProps) {
+  const { summary } = useAIStore();
+  const currentStreak = summary?.streaks?.current_streak ?? streak;
+  const longestStreak = summary?.streaks?.longest_streak ?? currentStreak;
+  const carbonStreak = summary?.streaks?.carbon_streak ?? 0;
+  const scoreStreak = summary?.streaks?.score_streak ?? 0;
+
   const days = [1, 2, 3, 4, 5, 6, 7];
 
   return (
@@ -23,9 +30,12 @@ export default function StreakFooter({ streak = 1 }: StreakFooterProps) {
         </div>
         <div>
           <h4 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-            Keep going! You're on a {streak} day streak.
+            Keep going! You're on a {currentStreak} day streak.
           </h4>
           <p className="text-[10px] text-stone-500 font-bold mt-0.5">
+            {longestStreak > currentStreak && `Personal Best: ${longestStreak} days. `}
+            {carbonStreak > 0 && `Carbon Streak: ${carbonStreak}d. `}
+            {scoreStreak > 0 && `High Score Streak: ${scoreStreak}d. `}
             Build a 7 day streak to unlock the <span className="text-emerald-450 font-extrabold">"Green Warrior"</span> badge!
           </p>
         </div>
@@ -34,8 +44,8 @@ export default function StreakFooter({ streak = 1 }: StreakFooterProps) {
       {/* Right side Day Timeline */}
       <div className="flex items-center space-x-2">
         {days.map((day) => {
-          const isActive = day === streak;
-          const isCompleted = day < streak;
+          const isActive = day === currentStreak;
+          const isCompleted = day < currentStreak;
           const isLast = day === 7;
           
           return (

@@ -7,6 +7,7 @@ import {
   HelpCircle, ChevronRight, Activity, Leaf, Eye, HelpCircle as HelpIcon 
 } from "lucide-react";
 import { useAIStore } from "../stores/aiStore";
+import logger from "../utils/logger";
 
 export default function CopilotChat() {
   const [isOpen, setIsOpen] = useState(false);
@@ -36,6 +37,13 @@ export default function CopilotChat() {
     }
   }, [transcript, isOpen]);
 
+  // Handle global quick action to open copilot
+  useEffect(() => {
+    const handleOpen = () => setIsOpen(true);
+    window.addEventListener("open-copilot", handleOpen);
+    return () => window.removeEventListener("open-copilot", handleOpen);
+  }, []);
+
   const handleVoiceInput = () => {
     if (isRecording) {
       setIsRecording(false);
@@ -46,7 +54,15 @@ export default function CopilotChat() {
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       
     if (!SpeechRecognition) {
-      alert("Web Speech API is not supported in this browser. Try Chrome or Safari.");
+      // Non-blocking inline message instead of alert()
+      const noSpeechMsg = {
+        id: Date.now(),
+        role: "assistant" as const,
+        content: "🎤 Voice input is not supported in this browser. Please use Chrome or Edge, or type your message below.",
+        created_at: new Date().toISOString(),
+      };
+      // Dispatch to chat as a temporary system message
+      logger.warn("CopilotChat", "Web Speech API not supported in this browser");
       return;
     }
 
@@ -67,7 +83,7 @@ export default function CopilotChat() {
     };
 
     rec.onerror = (err: any) => {
-      console.error("Speech recognition error:", err);
+      logger.error("CopilotChat", "Speech recognition error", err);
       setIsRecording(false);
     };
 

@@ -1,176 +1,279 @@
+"""
+activity_service.py — CarbonTracker Activity Service
+======================================================
+Core service layer for activity logging, score updates, and achievements.
+All database operations are individually wrapped with safe_db utilities
+to prevent any single failure from crashing the caller or the API.
+"""
 from datetime import datetime, date
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+import logging
+
 from app.models import Activity, User, SustainabilityScore, Achievement
 from app.nlp.parser import parse_activity_text
 from app.calculations.engines import (
     calculate_food_emission,
     calculate_transport_emission,
     calculate_appliance_emission,
-    calculate_generic_emission
+    calculate_generic_emission,
 )
+from app.utils.safe_db import safe_commit, safe_scalar, safe_query_first, safe_query_all, safe_count
+from app.services.gamification_service import check_and_unlock_achievements_v2
+
+logger = logging.getLogger("carbontracker.activity_service")
+
 
 def get_or_create_user(db: Session, username: str = "demo_user") -> User:
     """
-    Retrieves or creates a guest/demo user.
+    Retrieves or creates a guest/demo user. Never raises.
+    Returns a safe User object; on failure returns a transient User with id=0.
     """
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        user = User(username=username)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    return user
+    try:
+        user = safe_query_first(db.query(User).filter(User.username == username))
+        if not user:
+            user = User(username=username)
+            db.add(user)
+            if not safe_commit(db, f"create_user:{username}"):
+                # If commit fails, return a transient user so callers don't crash
+                user.id = 0
+                return user
+            try:
+                db.refresh(user)
+            except Exception as e:
+                logger.error(f"Failed to refresh user after create: {e}")
+        return user
+    except Exception as e:
+        logger.error(f"get_or_create_user failed for '{username}': {e}")
+        # Return a transient placeholder to keep callers running
+        fallback = User(username=username)
+        fallback.id = 0
+        return fallback
+
 
 def calculate_emissions(db: Session, parsed: dict, region: str = "Global") -> tuple[float, dict]:
     """
     Directs parsed activity data to correct calculation engine.
+    Returns (0.0, {}) on any calculation failure — never raises.
     """
-    category = parsed.get("category") or "general"
-    item = parsed.get("item") or "unknown"
-    quantity = parsed.get("quantity") if parsed.get("quantity") is not None else 1.0
-    unit = parsed.get("unit") or "unit"
-    
-    if category == "food":
-        return calculate_food_emission(db, item, quantity, unit, region=region)
-    elif category == "transport":
-        return calculate_transport_emission(db, item, quantity, unit, region=region)
-    elif category == "appliances" or category == "electricity":
-        duration = quantity if unit == "hours" else 1.0
-        qty = 1.0 if unit == "hours" else quantity
-        return calculate_appliance_emission(db, item, duration, qty, region=region)
-    else:
-        return calculate_generic_emission(db, category, item, quantity, unit, region=region)
+    try:
+        category = parsed.get("category") or "general"
+        item = parsed.get("item") or "unknown"
+        quantity = parsed.get("quantity") if parsed.get("quantity") is not None else 1.0
+        unit = parsed.get("unit") or "unit"
+
+        if category == "food":
+            return calculate_food_emission(db, item, quantity, unit, region=region)
+        elif category == "transport":
+            return calculate_transport_emission(db, item, quantity, unit, region=region)
+        elif category in ("appliances", "electricity"):
+            duration = quantity if unit == "hours" else 1.0
+            qty = 1.0 if unit == "hours" else quantity
+            return calculate_appliance_emission(db, item, duration, qty, region=region)
+        else:
+            return calculate_generic_emission(db, category, item, quantity, unit, region=region)
+    except Exception as e:
+        logger.error(f"calculate_emissions failed for category='{parsed.get('category')}' item='{parsed.get('item')}': {e}")
+        return 0.0, {"error": str(e), "fallback": True}
+
 
 def log_activity(db: Session, username: str, text: str, region: str = "Global") -> Activity:
     """
     Parses, calculates emissions, saves to DB, updates daily score, and unlocks achievements.
+    Fully protected — never crashes the caller on partial failure.
     """
     # 1. Get user
     user = get_or_create_user(db, username)
-    
-    # 2. Parse text
-    parsed = parse_activity_text(text)
-    
+
+    # 2. Parse text — isolated try/catch
+    parsed = {}
+    try:
+        parsed = parse_activity_text(text)
+    except Exception as e:
+        logger.error(f"NLP parse failed for text='{text}': {e}. Using safe defaults.")
+        parsed = {
+            "category": "lifestyle",
+            "item": "unknown",
+            "quantity": 1.0,
+            "unit": "unit",
+            "confidence": 0.0,
+            "suggestions": [],
+            "original_text": text,
+        }
+
     # 3. Calculate carbon
     emissions, metadata = calculate_emissions(db, parsed, region=region)
-    
-    # 4. Create activity record
+
+    # 4. Create and save activity record
     activity = Activity(
         user_id=user.id,
         input_text=text,
-        category=parsed["category"],
-        item=parsed["item"],
-        quantity=parsed["quantity"],
-        unit=parsed["unit"],
+        category=parsed.get("category", "lifestyle"),
+        item=parsed.get("item", "unknown"),
+        quantity=parsed.get("quantity", 1.0),
+        unit=parsed.get("unit", "unit"),
         calculated_value=emissions,
         metadata_json=metadata,
         region=region,
-        logged_at=datetime.utcnow()
+        logged_at=datetime.utcnow(),
     )
     db.add(activity)
-    db.commit()
-    db.refresh(activity)
-    
-    # 5. Update daily sustainability score
-    update_daily_score(db, user.id, date.today())
-    
-    # 6. Check for achievements
-    check_achievements(db, user.id, activity)
-    
+    if not safe_commit(db, "log_activity"):
+        logger.error("Failed to commit activity to database.")
+        return activity
+
+    try:
+        db.refresh(activity)
+    except Exception as e:
+        logger.error(f"Failed to refresh activity after save: {e}")
+
+    # 5. Update daily sustainability score — isolated
+    try:
+        update_daily_score(db, user.id, date.today())
+    except Exception as e:
+        logger.error(f"update_daily_score failed after activity log: {e}")
+
+    # 6. Check for achievements — isolated
+    try:
+        check_and_unlock_achievements_v2(db, user.id, activity)
+    except Exception as e:
+        logger.error(f"check_and_unlock_achievements_v2 failed after activity log: {e}")
+
     return activity
 
-def update_daily_score(db: Session, user_id: int, target_date: date) -> SustainabilityScore:
+
+def update_daily_score(db: Session, user_id: int, target_date: date) -> SustainabilityScore | None:
     """
-    Calculates cumulative emissions for a day and maps it to a score from 0-100.
+    Calculates cumulative emissions for a day and maps it to a 0-100 score.
+    Fully protected with individual try/catch blocks and rollback on failure.
     Budget:
       <= 3.0 kgCO2e -> 100 points
-      <= 15.0 kgCO2e -> Linear decrease
+      <= 15.0 kgCO2e -> linear decrease
       > 15.0 kgCO2e -> 0 points
     """
-    # Sum daily emissions
-    start_time = datetime.combine(target_date, datetime.min.time())
-    end_time = datetime.combine(target_date, datetime.max.time())
-    
-    daily_emissions = db.query(func.sum(Activity.calculated_value)).filter(
-        Activity.user_id == user_id,
-        Activity.logged_at >= start_time,
-        Activity.logged_at <= end_time
-    ).scalar() or 0.0
-    
-    # Calculate score
-    if daily_emissions <= 3.0:
-        score = 100.0
-    elif daily_emissions >= 15.0:
-        score = 0.0
-    else:
-        # Scale between 3.0 and 15.0
-        score = 100.0 - ((daily_emissions - 3.0) / 12.0) * 100.0
-        
-    score_record = db.query(SustainabilityScore).filter(
-        SustainabilityScore.user_id == user_id,
-        SustainabilityScore.date == target_date
-    ).first()
-    
-    if not score_record:
-        score_record = SustainabilityScore(
-            user_id=user_id,
-            date=target_date,
-            total_emissions=daily_emissions,
-            score=score
+    try:
+        start_time = datetime.combine(target_date, datetime.min.time())
+        end_time = datetime.combine(target_date, datetime.max.time())
+
+        daily_emissions = safe_scalar(
+            db.query(func.sum(Activity.calculated_value)).filter(
+                Activity.user_id == user_id,
+                Activity.logged_at >= start_time,
+                Activity.logged_at <= end_time,
+            ),
+            default=0.0,
         )
-        db.add(score_record)
-    else:
-        score_record.total_emissions = daily_emissions
-        score_record.score = score
-        
-    db.commit()
-    db.refresh(score_record)
-    return score_record
+        daily_emissions = float(daily_emissions or 0.0)
+
+        # Calculate score
+        if daily_emissions <= 3.0:
+            score = 100.0
+        elif daily_emissions >= 15.0:
+            score = 0.0
+        else:
+            score = 100.0 - ((daily_emissions - 3.0) / 12.0) * 100.0
+
+        score_record = safe_query_first(
+            db.query(SustainabilityScore).filter(
+                SustainabilityScore.user_id == user_id,
+                SustainabilityScore.date == target_date,
+            )
+        )
+
+        if not score_record:
+            score_record = SustainabilityScore(
+                user_id=user_id,
+                date=target_date,
+                total_emissions=daily_emissions,
+                score=score,
+            )
+            db.add(score_record)
+        else:
+            score_record.total_emissions = daily_emissions
+            score_record.score = score
+
+        if not safe_commit(db, f"update_daily_score:{user_id}:{target_date}"):
+            return score_record
+
+        try:
+            db.refresh(score_record)
+        except Exception as e:
+            logger.error(f"Failed to refresh score_record: {e}")
+
+        return score_record
+
+    except Exception as e:
+        logger.error(f"update_daily_score failed for user_id={user_id} date={target_date}: {e}")
+        return None
+
 
 def check_achievements(db: Session, user_id: int, new_activity: Activity) -> list[Achievement]:
     """
     Checks triggers to unlock badges for sustainable habits.
+    Individually protected — a single achievement unlock failure doesn't abort others.
     """
     unlocked = []
-    
+
     def unlock(name: str, desc: str, badge_type: str):
-        existing = db.query(Achievement).filter(
-            Achievement.user_id == user_id,
-            Achievement.name == name
-        ).first()
-        if not existing:
-            ach = Achievement(
-                user_id=user_id,
-                name=name,
-                description=desc,
-                badge_type=badge_type
+        try:
+            existing = safe_query_first(
+                db.query(Achievement).filter(
+                    Achievement.user_id == user_id,
+                    Achievement.name == name,
+                )
             )
-            db.add(ach)
-            unlocked.append(ach)
-            
+            if not existing:
+                ach = Achievement(
+                    user_id=user_id,
+                    name=name,
+                    description=desc,
+                    badge_type=badge_type,
+                )
+                db.add(ach)
+                unlocked.append(ach)
+        except Exception as e:
+            logger.error(f"Achievement unlock check failed for '{name}': {e}")
+
     # Trigger 1: First Log
-    total_logs = db.query(Activity).filter(Activity.user_id == user_id).count()
+    total_logs = safe_count(db.query(Activity).filter(Activity.user_id == user_id))
     if total_logs >= 1:
         unlock("Eco Pioneer", "Logged your first carbon activity!", "bronze")
-        
-    # Trigger 2: Low Carbon Commuter (walk, cycle, metro, train)
-    if new_activity.category == "transport" and new_activity.item in ["walking", "cycling", "metro", "train"]:
-        unlock("Green Commuter", "Opted for low-emission transport (walk, cycle, metro or train).", "silver")
-        
+
+    # Trigger 2: Low Carbon Commuter
+    try:
+        if new_activity.category == "transport" and new_activity.item in [
+            "walking", "cycling", "metro", "train"
+        ]:
+            unlock("Green Commuter", "Opted for low-emission transport.", "silver")
+    except Exception as e:
+        logger.error(f"Achievement trigger 2 failed: {e}")
+
     # Trigger 3: Plant-Based Meal
-    if new_activity.category == "food" and new_activity.item in ["curd rice", "vegetables", "dosa", "idli"]:
-        unlock("Plant-based Champion", "Ate a carbon-conscious vegetarian or vegan meal.", "silver")
-        
-    # Trigger 4: Power Saver (solar energy or smart appliance duration)
-    if new_activity.category == "appliances" and new_activity.quantity <= 1.0 and new_activity.unit == "hours":
-        unlock("Power Saver", "Used energy-demanding appliances for 1 hour or less.", "bronze")
-        
-    # Trigger 5: Clean Streak (logged 5 activities in general)
+    try:
+        if new_activity.category == "food" and new_activity.item in [
+            "curd rice", "vegetables", "dosa", "idli"
+        ]:
+            unlock("Plant-based Champion", "Ate a carbon-conscious vegetarian meal.", "silver")
+    except Exception as e:
+        logger.error(f"Achievement trigger 3 failed: {e}")
+
+    # Trigger 4: Power Saver
+    try:
+        if (
+            new_activity.category == "appliances"
+            and new_activity.quantity is not None
+            and new_activity.quantity <= 1.0
+            and new_activity.unit == "hours"
+        ):
+            unlock("Power Saver", "Used energy-demanding appliances for 1 hour or less.", "bronze")
+    except Exception as e:
+        logger.error(f"Achievement trigger 4 failed: {e}")
+
+    # Trigger 5: Consistent Logger
     if total_logs >= 5:
         unlock("Consistent Climateer", "Logged 5 or more activities in CarbonTracker.", "gold")
-        
+
     if unlocked:
-        db.commit()
-        
+        safe_commit(db, "check_achievements")
+
     return unlocked

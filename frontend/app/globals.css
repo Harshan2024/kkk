@@ -1,3 +1,14 @@
+/* ============================================================
+   LOCKED: globals.css — CarbonTracker Core Design System
+   Do NOT modify this file during feature development.
+   Changes require team review. This file controls:
+   - Glassmorphism system (.glass-card)
+   - Background patterns (.dot-matrix)
+   - Scrollbar styling
+   - Skeleton animation
+   - Glow effects (.glow-btn)
+   ============================================================ */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

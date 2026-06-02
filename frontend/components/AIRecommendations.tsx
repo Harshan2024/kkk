@@ -40,7 +40,11 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
       impact_estimate: "Praise",
       why_explanation: "Using low-emission options like bicycling has lowered your footprint relative to your peers.",
       how_calculation: "Calculated based on 25km of active commuting.",
-      confidence_score: 0.95
+      confidence_score: 0.95,
+      weighted_priority_score: 85.5,
+      feasibility: "HIGH",
+      difficulty: "EASY",
+      impact_value: 0.0
     },
     {
       id: 102,
@@ -49,7 +53,11 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
       impact_estimate: "1.3 kg CO₂",
       why_explanation: "Buses and trains share emissions across passengers, making them much cleaner per passenger-km.",
       how_calculation: "Saving 10km driving by swapping to metro transit.",
-      confidence_score: 0.90
+      confidence_score: 0.90,
+      weighted_priority_score: 72.0,
+      feasibility: "HIGH",
+      difficulty: "EASY",
+      impact_value: 1.3
     },
     {
       id: 103,
@@ -58,7 +66,11 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
       impact_estimate: "0.8 kg CO₂",
       why_explanation: "Air conditioning draws substantial electric loads from regional fossil-powered grids.",
       how_calculation: "Savings from 7 hours of AC runtime reduction.",
-      confidence_score: 0.88
+      confidence_score: 0.88,
+      weighted_priority_score: 64.2,
+      feasibility: "MEDIUM",
+      difficulty: "MEDIUM",
+      impact_value: 0.8
     }
   ];
 
@@ -140,12 +152,42 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
                             <p className="text-stone-400 font-medium leading-relaxed">{insight.why_explanation}</p>
                           </div>
                         )}
-                        {insight.impact_estimate && insight.impact_estimate !== "Praise" && (
-                          <div className="flex justify-between items-center border-t border-white/5 pt-1.5 mt-1.5">
-                            <span>Carbon Saved:</span>
-                            <span className="text-emerald-400">{insight.impact_estimate}</span>
+                        {insight.how_calculation && (
+                          <div>
+                            <span className="text-[8px] uppercase tracking-widest text-sky-400 block mb-0.5">Calculation Formula</span>
+                            <p className="text-stone-400 font-medium leading-relaxed">{insight.how_calculation}</p>
                           </div>
                         )}
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 border-t border-white/5 pt-1.5 mt-1.5 text-[9px] text-stone-550 font-bold">
+                          {insight.weighted_priority_score !== undefined && (
+                            <div className="flex justify-between">
+                              <span>Priority Score:</span>
+                              <span className="text-emerald-400">{insight.weighted_priority_score.toFixed(1)}</span>
+                            </div>
+                          )}
+                          {(insight.impact_estimate || insight.impact_value) && (
+                            <div className="flex justify-between">
+                              <span>Carbon Saved:</span>
+                              <span className="text-emerald-450">
+                                {insight.impact_estimate && insight.impact_estimate !== "Praise" 
+                                  ? insight.impact_estimate 
+                                  : `${insight.impact_value || 0} kg CO₂`}
+                              </span>
+                            </div>
+                          )}
+                          {insight.feasibility && (
+                            <div className="flex justify-between">
+                              <span>Feasibility:</span>
+                              <span className="text-stone-300">{insight.feasibility}</span>
+                            </div>
+                          )}
+                          {insight.difficulty && (
+                            <div className="flex justify-between">
+                              <span>Difficulty:</span>
+                              <span className="text-stone-300">{insight.difficulty}</span>
+                            </div>
+                          )}
+                        </div>
                       </motion.div>
                     )}
                   </AnimatePresence>

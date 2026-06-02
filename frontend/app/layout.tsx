@@ -1,3 +1,9 @@
+/**
+ * layout.tsx — CarbonTracker Root Layout
+ * =======================================
+ * LOCKED: Do NOT modify during feature development.
+ * Changes require team review. Controls: fonts, metadata, html/body shell.
+ */
 import type { Metadata } from "next";
 import "./globals.css";
 

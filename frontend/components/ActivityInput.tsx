@@ -19,6 +19,7 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
   const [logging, setLogging] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [activeTab, setActiveTab] = useState("ai");
+  const [loggedImpact, setLoggedImpact] = useState<{ value: number; item: string } | null>(null);
   
   const { logActivity } = useAIStore();
 
@@ -46,9 +47,27 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
     return () => clearTimeout(delayDebounceFn);
   }, [inputText, region]);
 
+  // Handle global voice logging trigger
+  useEffect(() => {
+    const handleVoiceTrigger = () => {
+      setActiveTab("ai");
+      handleVoiceInput();
+    };
+    window.addEventListener("trigger-voice-log", handleVoiceTrigger);
+    return () => window.removeEventListener("trigger-voice-log", handleVoiceTrigger);
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || logging) return;
+
+    if (parseResult) {
+      setLoggedImpact({
+        value: parseResult.calculated_value,
+        item: parseResult.parsed.item
+      });
+      setTimeout(() => setLoggedImpact(null), 10000);
+    }
 
     setLogging(true);
     try {
@@ -342,6 +361,37 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
                 <span>Enter details above to calculate emissions...</span>
               </div>
             )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Educational comparison panel */}
+      <AnimatePresence>
+        {loggedImpact && (
+          <motion.div 
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            className="mt-4 p-4.5 rounded-2xl bg-emerald-950/20 border border-emerald-500/20 text-emerald-450 text-xs flex items-center justify-between"
+          >
+            <div>
+              <h5 className="font-extrabold uppercase text-[9px] tracking-widest text-emerald-405 mb-1 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                Logged successfully to cloud database
+              </h5>
+              <p className="font-bold text-stone-300">
+                Generated <span className="text-white font-extrabold">{loggedImpact.value.toFixed(2)} kg CO₂</span> for <span className="capitalize text-white">"{loggedImpact.item}"</span>.
+              </p>
+              <p className="text-[10px] text-stone-500 mt-1 leading-normal font-bold">
+                Equivalent to: charging <span className="text-emerald-400 font-extrabold">{Math.round(loggedImpact.value * 120)}</span> smartphones, or running a standard electric fan for <span className="text-emerald-400 font-extrabold">{Math.round(loggedImpact.value * 24)}</span> hours.
+              </p>
+            </div>
+            <button 
+              onClick={() => setLoggedImpact(null)} 
+              className="text-stone-550 hover:text-white font-bold p-1 cursor-pointer transition-colors"
+            >
+              ✕
+            </button>
           </motion.div>
         )}
       </AnimatePresence>

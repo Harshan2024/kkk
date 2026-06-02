@@ -72,6 +72,7 @@ KEYWORD_MAPPINGS = {
     "tesla": ("transport", "ev", "km"),
     "bike": ("transport", "bike", "km"),
     "motorcycle": ("transport", "bike", "km"),
+    "scooter": ("transport", "bike", "km"),
     "bus": ("transport", "bus", "km"),
     "train": ("transport", "train", "km"),
     "metro": ("transport", "metro", "km"),
@@ -207,7 +208,8 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
     if not matched_keyword:
         try:
             from app.ai.semantic.semantic import find_semantic_match, get_semantic_confidence
-            sem_match = find_semantic_match(cleaned)
+            from app.utils.circuit_breaker import breakers
+            sem_match = breakers["embeddings"].call(find_semantic_match, cleaned)
             if sem_match:
                 matched_keyword, similarity = sem_match
                 cat, canonical_item, def_unit = KEYWORD_MAPPINGS[matched_keyword]
@@ -216,7 +218,7 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
                 unit = def_unit
                 confidence, ambiguity = get_semantic_confidence(cleaned, matched_keyword, similarity)
         except Exception as e:
-            # Fallback if import fails
+            # Fallback if import or semantic match fails (including open circuit)
             pass
 
     # Apply parsed values if found
@@ -356,10 +358,15 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
 
 def parse_compound_activity(text: str) -> List[Dict[str, Any]]:
     """
-    Splits compound natural language strings (e.g. using 'and' or 'then')
+    Splits compound natural language strings (e.g. using 'and', 'then', 'as well as', 'along with')
     into multiple individual activity dictionaries.
     """
-    parts = re.split(r'\s+and\s+|\s+then\s+|,\s*', text)
+    # Regex splitting on: and also, as well as, along with, then, plus, and, commas
+    parts = re.split(
+        r'\s+and\s+also\s+|\s+as\s+well\s+as\s+|\s+along\s+with\s+|\s+then\s+|\s+plus\s+|\s+and\s+|,\s*',
+        text,
+        flags=re.IGNORECASE
+    )
     results = []
     
     for part in parts:

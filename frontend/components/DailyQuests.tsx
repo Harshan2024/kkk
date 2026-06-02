@@ -3,6 +3,7 @@
 import React from "react";
 import { Trophy, Bike, Plug, Leaf, Recycle, ChevronRight, Check } from "lucide-react";
 import { motion } from "framer-motion";
+import { useAIStore } from "../stores/aiStore";
 
 interface Quest {
   id: string;
@@ -15,8 +16,20 @@ interface Quest {
   color: string;
 }
 
+const ICON_MAP: Record<string, any> = {
+  Bike: Bike,
+  Plug: Plug,
+  Leaf: Leaf,
+  Recycle: Recycle,
+};
+
 export default function DailyQuests() {
-  const quests: Quest[] = [
+  const { summary } = useAIStore();
+
+  const quests: Quest[] = summary?.quests?.map((q) => ({
+    ...q,
+    icon: ICON_MAP[q.icon] || Leaf
+  })) || [
     {
       id: "q1",
       name: "The Velocity Shift",
@@ -59,7 +72,9 @@ export default function DailyQuests() {
     }
   ];
 
-  const overallProgress = quests.reduce((acc, curr) => acc + (curr.progress / curr.max), 0) / quests.length;
+  const overallProgress = quests.length > 0 
+    ? quests.reduce((acc, curr) => acc + (curr.progress / curr.max), 0) / quests.length
+    : 0;
 
   return (
     <div className="glass-card rounded-3xl p-5 sm:p-6 transition-all duration-300 flex flex-col justify-between h-[360px] select-none">

@@ -89,9 +89,11 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
     );
   }
 
-  const { breakdown, trends } = summary;
+  // Safely extract arrays — always default to [] even if API returns null
+  const breakdown = summary.breakdown ?? [];
+  const trends = summary.trends ?? [];
 
-  // Format pie chart data
+  // Format pie chart data — safe to call .filter on guaranteed array
   const pieData = breakdown
     .filter((cat) => cat.total_carbon > 0)
     .map((cat) => {
@@ -103,6 +105,7 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
         color: CATEGORY_COLORS[safeCategory] || "#10b981",
       };
     });
+
 
   // Format habit grid grid cells (past 7 days)
   const getGridColor = (score: number) => {
