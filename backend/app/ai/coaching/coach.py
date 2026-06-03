@@ -5,6 +5,8 @@ from app.models import Activity, AIInsight
 from app.ai.recommendation.recommender import get_recommendation_candidates
 from app.ai.ranking.ranker import rank_recommendations
 
+from app.utils.safe_db import safe_query_all, safe_commit, DatabaseUnavailableException
+
 def analyze_user_habits(db: Session, user_id: int) -> list[dict]:
     """
     Scans the user's logged activity logs and identifies behavioral patterns.
@@ -13,9 +15,11 @@ def analyze_user_habits(db: Session, user_id: int) -> list[dict]:
     habits = []
     
     # Query last 30 activities
-    activities = db.query(Activity).filter(
-        Activity.user_id == user_id
-    ).order_by(Activity.logged_at.desc()).limit(50).all()
+    activities = safe_query_all(
+        db.query(Activity).filter(
+            Activity.user_id == user_id
+        ).order_by(Activity.logged_at.desc()).limit(50)
+    )
     
     if not activities:
         # Default coaching habits
@@ -96,11 +100,20 @@ def generate_personalized_recommendations(db: Session, user_id: int) -> list[AII
     candidates = get_recommendation_candidates()
     ranked = rank_recommendations(candidates)
     
-    # Clear active insights
-    db.query(AIInsight).filter(
-        AIInsight.user_id == user_id, 
-        AIInsight.is_active == 1
-    ).delete()
+    # Check read-only state before performing database write operations
+    from app.database import session as db_session
+    if db_session.READ_ONLY_MODE:
+        raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
+        
+    # Clear active insights safely
+    def _delete_insights():
+        db.query(AIInsight).filter(
+            AIInsight.user_id == user_id, 
+            AIInsight.is_active == 1
+        ).delete()
+    
+    from app.utils.safe_db import run_db_with_retry
+    run_db_with_retry(_delete_insights, "delete_insights", db=db)
     
     insights = []
     # Save top 4 ranked recommendations
@@ -125,5 +138,5 @@ def generate_personalized_recommendations(db: Session, user_id: int) -> list[AII
         db.add(ins)
         insights.append(ins)
         
-    db.commit()
+    safe_commit(db, "save_recommendations")
     return insights

@@ -11,7 +11,7 @@ except ImportError:
         "anyio not installed — multimodal upload will use synchronous fallback."
     )
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks, Request
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from datetime import datetime, date, timedelta
@@ -23,6 +23,7 @@ from app.models import Activity, User, SustainabilityScore, Achievement, Emissio
 from app.services.activity_service import log_activity, get_or_create_user, update_daily_score, check_achievements
 from app.services.insight_service import get_active_insights, generate_insights
 from app.nlp.parser import parse_activity_text, parse_compound_activity
+from app.utils.safe_db import safe_commit, safe_scalar, safe_query_all, safe_query_first, safe_count, DatabaseUnavailableException
 from app.calculations.engines import calculate_appliance_emission
 from app.emissions.factors import seed_db
 
@@ -33,14 +34,29 @@ from app.ai.coaching.coach import analyze_user_habits, generate_personalized_rec
 from app.ai.multimodal.ocr import parse_receipt_image
 from app.ai.observability.observability import get_observability_summary, track_latency
 from app.services.forecast_service import get_user_forecast
-from app.utils.logger import log_structured_error
+from app.utils.logger import log_structured, log_structured_error
 from app.utils.circuit_breaker import breakers
 from app.utils.rate_limiter import check_rate_limit
 from app.config.config import settings
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("carbontracker.api")
+
+class StructuredLoggerWrapper:
+    def __init__(self, service_name: str):
+        self.service_name = service_name
+    def info(self, msg: str):
+        log_structured("INFO", self.service_name, msg)
+    def warning(self, msg: str):
+        log_structured("WARNING", self.service_name, msg)
+    def error(self, msg: str):
+        import sys
+        _, exc, _ = sys.exc_info()
+        log_structured("ERROR", self.service_name, msg, exception=exc)
+    def critical(self, msg: str):
+        log_structured("CRITICAL", self.service_name, msg)
+
+logger = StructuredLoggerWrapper("api")
 
 # Helper sanitization functions
 def sanitize_float(val: any, default: float = 0.0) -> float:
@@ -203,9 +219,9 @@ class CorrectionRequest(BaseModel):
     category: Optional[str] = "nlp_parse"
     username: Optional[str] = "demo_user"
 
-# GET /activities/parse
 @router.get("/activities/parse")
 def parse_activity(
+    request: Request,
     text: str = Query(..., description="The activity text to parse"), 
     region: str = Query("Global", description="User active region for grid calculation"),
     db: Session = Depends(get_db)
@@ -214,7 +230,7 @@ def parse_activity(
     Parses natural language input and runs calculation without writing to database.
     Supports compound activities by splitting and calculating values.
     """
-    check_rate_limit("anonymous", "/activities/parse", limit=60)
+    check_rate_limit(request, "anonymous", "/activities/parse", limit=60)
     start_time = time.time()
     logger.info(f"Incoming parse preview request: '{text}' in region '{region}'")
     if not text.strip():
@@ -305,6 +321,9 @@ def create_activity(payload: ActivityLogRequest, background_tasks: BackgroundTas
     Supports compound activity parsing to create multiple database entries independently.
     Uses background tasks to offload database writes and scoring from the request thread.
     """
+    from app.database import session as db_session
+    if db_session.READ_ONLY_MODE:
+        raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
     start_time = time.time()
     region = payload.region or "Global"
     logger.info(f"Incoming log activity request: '{payload.text}' for user '{payload.username}' in region '{region}'")
@@ -378,12 +397,11 @@ async def upload_multimodal(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    """
-    Handles image uploads (receipts or electricity bills) asynchronously.
-    Runs mock OCR parsing and logs all detected activities via background task.
-    """
+    from app.database import session as db_session
+    if db_session.READ_ONLY_MODE:
+        raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
     start_time = time.time()
-    logger.info(f"Multimodal image upload received: '{file.filename}' for user '{username}'")
+    logger.info(f"Incoming log activity request for multimodal upload: '{file.filename}' for user '{username}'")
     
     # 1. OCR File Type & Size Validation
     filename = file.filename or ""
@@ -421,7 +439,7 @@ async def upload_multimodal(
             return {
                 "success": False,
                 "data": {},
-                "error": "AI OCR service is temporarily unavailable. Please type your activity manually."
+                "error": "AI service temporarily unavailable"
             }
 
         
@@ -493,6 +511,9 @@ def correct_activity(payload: CorrectionRequest, db: Session = Depends(get_db)):
     """
     Registers a human-in-the-loop parsing correction for conversational training.
     """
+    from app.database import session as db_session
+    if db_session.READ_ONLY_MODE:
+        raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
     try:
         user = get_or_create_user(db, payload.username)
         record = record_user_correction(
@@ -556,14 +577,13 @@ def read_activities(
             "error": f"Failed to fetch activities: {str(e)}"
         }
 
-# POST /chat
 @router.post("/chat")
-def post_chat_query(payload: ChatRequest, db: Session = Depends(get_db)):
+def post_chat_query(payload: ChatRequest, request: Request, db: Session = Depends(get_db)):
     """
     Converses with the AI Sustainability Copilot.
     Unifies memory lookup and outputs a customized response.
     """
-    check_rate_limit(payload.username, "/chat", limit=60)
+    check_rate_limit(request, payload.username, "/chat", limit=60)
     try:
         user = get_or_create_user(db, payload.username)
         response = orchestrate_chat_response(db, payload.username, user.id, payload.message)
@@ -618,6 +638,7 @@ def get_chat_history_list(username: str = "demo_user", db: Session = Depends(get
 # GET /analytics/forecast
 @router.get("/analytics/forecast")
 def get_forecasting(
+    request: Request,
     username: str = "demo_user",
     steps: int = 30,
     model: str = "prophet",
@@ -626,7 +647,7 @@ def get_forecasting(
     """
     Exposes Expected, Optimistic, and Pessimistic forecasted projections.
     """
-    check_rate_limit(username, "/analytics/forecast", limit=60)
+    check_rate_limit(request, username, "/analytics/forecast", limit=60)
     start_time = time.time()
     try:
         user = get_or_create_user(db, username)
@@ -701,135 +722,128 @@ def get_dashboard_summary(username: str = "demo_user", db: Session = Depends(get
         start_of_today = datetime.combine(today, datetime.min.time())
         end_of_today = datetime.combine(today, datetime.max.time())
         
-        try:
-            today_val = db.query(func.sum(Activity.calculated_value)).filter(
+        today_val = safe_scalar(
+            db.query(func.sum(Activity.calculated_value)).filter(
                 Activity.user_id == user_id,
                 Activity.logged_at >= start_of_today,
                 Activity.logged_at <= end_of_today
-            ).scalar()
-            today_emissions = float(today_val) if today_val is not None else 0.0
-        except Exception as e:
-            logger.error(f"Database error fetching today's emissions: {str(e)}")
-            today_emissions = 0.0
+            ),
+            default=0.0
+        )
+        today_emissions = float(today_val or 0.0)
             
         # 2. Yesterday emissions
         yesterday = today - timedelta(days=1)
         start_of_yesterday = datetime.combine(yesterday, datetime.min.time())
         end_of_yesterday = datetime.combine(yesterday, datetime.max.time())
         
-        try:
-            yesterday_val = db.query(func.sum(Activity.calculated_value)).filter(
+        yesterday_val = safe_scalar(
+            db.query(func.sum(Activity.calculated_value)).filter(
                 Activity.user_id == user_id,
                 Activity.logged_at >= start_of_yesterday,
                 Activity.logged_at <= end_of_yesterday
-            ).scalar()
-            yesterday_emissions = float(yesterday_val) if yesterday_val is not None else 0.0
-        except Exception as e:
-            logger.error(f"Database error fetching yesterday's emissions: {str(e)}")
-            yesterday_emissions = 0.0
+            ),
+            default=0.0
+        )
+        yesterday_emissions = float(yesterday_val or 0.0)
             
         # 3. Weekly total
         one_week_ago = datetime.utcnow() - timedelta(days=7)
-        try:
-            weekly_val = db.query(func.sum(Activity.calculated_value)).filter(
+        weekly_val = safe_scalar(
+            db.query(func.sum(Activity.calculated_value)).filter(
                 Activity.user_id == user_id,
                 Activity.logged_at >= one_week_ago
-            ).scalar()
-            weekly_emissions = float(weekly_val) if weekly_val is not None else 0.0
-        except Exception as e:
-            logger.error(f"Database error fetching weekly emissions: {str(e)}")
-            weekly_emissions = 0.0
+            ),
+            default=0.0
+        )
+        weekly_emissions = float(weekly_val or 0.0)
             
         # 4. Category-wise breakdown
         breakdown = []
         total_lifetime = 0.0
-        try:
-            category_data = db.query(
+        category_data = safe_query_all(
+            db.query(
                 Activity.category,
                 func.sum(Activity.calculated_value).label("total_carbon"),
                 func.count(Activity.id).label("count")
             ).filter(
                 Activity.user_id == user_id
-            ).group_by(Activity.category).all()
+            ).group_by(Activity.category)
+        )
+        
+        for row in category_data:
+            carb_val = float(row.total_carbon) if row.total_carbon is not None else 0.0
+            cnt_val = int(row.count) if row.count is not None else 0
+            breakdown.append({
+                "category": sanitize_category(row.category),
+                "total_carbon": round(carb_val, 3),
+                "count": cnt_val
+            })
+            total_lifetime += carb_val
             
-            for row in category_data:
-                carb_val = float(row.total_carbon) if row.total_carbon is not None else 0.0
-                cnt_val = int(row.count) if row.count is not None else 0
-                breakdown.append({
-                    "category": sanitize_category(row.category),
-                    "total_carbon": round(carb_val, 3),
-                    "count": cnt_val
-                })
-                total_lifetime += carb_val
-                
-            for cat in breakdown:
-                cat["percentage"] = round((cat["total_carbon"] / total_lifetime * 100), 1) if total_lifetime > 0 else 0.0
-        except Exception as e:
-            logger.error(f"Database error compiling category breakdown: {str(e)}")
-            breakdown = []
+        for cat in breakdown:
+            cat["percentage"] = round((cat["total_carbon"] / total_lifetime * 100), 1) if total_lifetime > 0 else 0.0
             
         # 5. Sustainability Score (budget limit = 5.0 kgCO2e)
         daily_budget = 5.0
         score_val = max(0.0, min(100.0, 100.0 - (today_emissions / daily_budget) * 50.0))
         
-        try:
-            score_record = db.query(SustainabilityScore).filter(
+        score_record = safe_query_first(
+            db.query(SustainabilityScore).filter(
                 SustainabilityScore.user_id == user_id,
                 SustainabilityScore.date == today
-            ).first()
-            if not score_record:
-                score_record = SustainabilityScore(
-                    user_id=user_id,
-                    date=today,
-                    total_emissions=today_emissions,
-                    score=score_val
-                )
-                db.add(score_record)
-            else:
-                score_record.total_emissions = today_emissions
-                score_record.score = score_val
-            db.commit()
-            current_score = float(score_record.score)
-        except Exception as e:
-            logger.error(f"Failed to update daily score record: {str(e)}")
-            current_score = score_val
+            )
+        )
+        if not score_record:
+            score_record = SustainabilityScore(
+                user_id=user_id,
+                date=today,
+                total_emissions=today_emissions,
+                score=score_val
+            )
+            db.add(score_record)
+        else:
+            score_record.total_emissions = today_emissions
+            score_record.score = score_val
+            
+        from app.database import session as db_session
+        if not db_session.READ_ONLY_MODE:
+            try:
+                safe_commit(db, "update_dashboard_daily_score")
+            except Exception as ce:
+                logger.error(f"Failed to commit dashboard score: {ce}")
+        
+        current_score = float(score_record.score) if score_record else score_val
             
         # Average weekly score
-        try:
-            avg_val = db.query(func.avg(SustainabilityScore.score)).filter(
+        avg_val = safe_scalar(
+            db.query(func.avg(SustainabilityScore.score)).filter(
                 SustainabilityScore.user_id == user_id,
                 SustainabilityScore.date >= today - timedelta(days=7)
-            ).scalar()
-            avg_weekly_score = float(avg_val) if avg_val is not None else 100.0
-        except Exception as e:
-            logger.error(f"Failed to query average weekly score: {str(e)}")
-            avg_weekly_score = 100.0
+            ),
+            default=100.0
+        )
+        avg_weekly_score = float(avg_val or 100.0)
             
         # 6. Weekly history trends
         trends = []
         for i in range(6, -1, -1):
             d = today - timedelta(days=i)
-            try:
-                d_score_rec = db.query(SustainabilityScore).filter(
+            d_score_rec = safe_query_first(
+                db.query(SustainabilityScore).filter(
                     SustainabilityScore.user_id == user_id,
                     SustainabilityScore.date == d
-                ).first()
-                
-                if d_score_rec:
-                    trends.append({
-                        "date": d.strftime("%a"),
-                        "date_full": d.strftime("%Y-%m-%d"),
-                        "emissions": round(float(d_score_rec.total_emissions or 0.0), 3),
-                        "score": round(float(d_score_rec.score or 100.0), 1)
-                    })
-                else:
-                    trends.append({
-                        "date": d.strftime("%a"),
-                        "date_full": d.strftime("%Y-%m-%d"),
-                        "emissions": 0.0,
-                        "score": 100.0
-                    })
-            except Exception:
+                )
+            )
+            
+            if d_score_rec:
+                trends.append({
+                    "date": d.strftime("%a"),
+                    "date_full": d.strftime("%Y-%m-%d"),
+                    "emissions": round(float(d_score_rec.total_emissions or 0.0), 3),
+                    "score": round(float(d_score_rec.score or 100.0), 1)
+                })
+            else:
                 trends.append({
                     "date": d.strftime("%a"),
                     "date_full": d.strftime("%Y-%m-%d"),
@@ -838,11 +852,9 @@ def get_dashboard_summary(username: str = "demo_user", db: Session = Depends(get
                 })
                 
         # 7. Achievement metrics
-        try:
-            ach_count = db.query(Achievement).filter(Achievement.user_id == user_id).count()
-        except Exception as e:
-            logger.error(f"Failed to query achievements count: {str(e)}")
-            ach_count = 0
+        ach_count = safe_count(
+            db.query(Achievement).filter(Achievement.user_id == user_id)
+        )
             
         # 8. Habit spikes / behavioral coaching cards (AI Subsystem Try-Catch Isolation)
         try:
@@ -970,12 +982,12 @@ def get_dashboard_summary(username: str = "demo_user", db: Session = Depends(get
 
 # GET /insights
 @router.get("/insights")
-def read_insights(username: str = "demo_user", db: Session = Depends(get_db)):
+def read_insights(request: Request, username: str = "demo_user", db: Session = Depends(get_db)):
     """
     Retrieves ranked AI Insights. If none exist in the database, generates them.
     Isolates insights generation from total dashboard failure on error.
     """
-    check_rate_limit(username, "/insights", limit=60)
+    check_rate_limit(request, username, "/insights", limit=60)
     logger.info(f"Fetching insights for user '{username}'")
     try:
         user = get_or_create_user(db, username)
@@ -1024,6 +1036,16 @@ def read_insights(username: str = "demo_user", db: Session = Depends(get_db)):
             "error": f"Failed to fetch insights: {str(e)}"
         }
 
+@router.get("/recommendations")
+def get_recommendations_alias(request: Request, username: str = "demo_user", db: Session = Depends(get_db)):
+    check_rate_limit(request, username, "/recommendations", limit=60)
+    return read_insights(request, username, db)
+
+@router.get("/forecast")
+def get_forecast_alias(request: Request, username: str = "demo_user", steps: int = 30, model: str = "prophet", db: Session = Depends(get_db)):
+    check_rate_limit(request, username, "/forecast", limit=60)
+    return get_forecasting(request, username, steps, model, db)
+
 # GET /achievements
 @router.get("/achievements")
 def read_achievements(username: str = "demo_user", db: Session = Depends(get_db)):
@@ -1059,7 +1081,6 @@ def read_achievements(username: str = "demo_user", db: Session = Depends(get_db)
             "error": f"Failed to fetch achievements: {str(e)}"
         }
 
-# POST /seed
 @router.post("/seed")
 def seed_database(
     username: str = "demo_user",
@@ -1071,20 +1092,24 @@ def seed_database(
     PROTECTED: Requires confirm=true query parameter to prevent accidental data loss.
     Only available in development environment.
     """
+    from app.database import session as db_session
+    if db_session.READ_ONLY_MODE:
+        raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
     import os
     env = os.getenv("ENVIRONMENT", "development").strip().lower()
     
     # Audit log seeding attempt
-    log_structured_error(
+    log_structured(
+        level="WARNING",
         service="seed_database",
-        severity="warning",
-        message=f"Database seed requested by user '{username}' (env: '{env}', confirm: {confirm})"
+        message=f"Database seed requested by user '{username}' (env: '{env}', confirm: {confirm})",
+        context={"username": username, "env": env, "confirm": confirm}
     )
     
     if env != "development":
         raise HTTPException(
             status_code=403,
-            detail="Forbidden: Database seeding is only allowed in the development environment."
+            detail="Seed endpoint disabled outside development environment"
         )
 
     if not confirm:

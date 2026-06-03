@@ -18,12 +18,25 @@ VAGUE_PHRASES = {
     "working on mac": "laptop"
 }
 
+from app.utils.circuit_breaker import breakers
+
 def find_semantic_match(text: str) -> Optional[Tuple[str, float]]:
     """
     Computes semantic similarity between user text and known keywords/phrases.
-    Returns: (matched_keyword, similarity_score) or None.
-    Falls back gracefully to keyword matching on error.
+    Wrapped in semantic_search circuit breaker.
     """
+    try:
+        return breakers["semantic_search"].call(_find_semantic_match, text)
+    except Exception:
+        # Fallback to basic case-insensitive substring checks if breaker is open or fails
+        text_clean = text.lower().strip()
+        for kw in KEYWORD_MAPPINGS.keys():
+            if kw in text_clean:
+                return kw, 0.80
+        return None
+
+def _find_semantic_match(text: str) -> Optional[Tuple[str, float]]:
+    """Internal implementation of semantic match search."""
     text_clean = text.lower().strip()
     
     # 1. Direct dictionary check first for typical vague sentences

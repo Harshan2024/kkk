@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { Leaf, RefreshCw, CheckCircle2, Globe } from "lucide-react";
+import { Leaf, RefreshCw, CheckCircle2, Globe, AlertTriangle } from "lucide-react";
+import { useAIStore } from "../stores/aiStore";
 import { api } from "../services/api";
 
 interface NavbarProps {
@@ -22,19 +23,49 @@ const REGIONS = [
 export default function Navbar({ onRefresh, region, onRegionChange }: NavbarProps) {
   const [seeding, setSeeding] = useState(false);
   const [seeded, setSeeded] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const { setToastError } = useAIStore();
 
-  const handleSeed = async () => {
-    setSeeding(true);
-    try {
-      await api.seedDatabase();
-      setSeeded(true);
-      onRefresh();
-      setTimeout(() => setSeeded(false), 3000);
-    } catch (err) {
-      alert("Database seed failed. Make sure your FastAPI backend is running!");
-      console.error(err);
-    } finally {
-      setSeeding(false);
+  const handleSeed = async (forceConfirm = false) => {
+    if (!forceConfirm) {
+      setSeeding(true);
+      try {
+        const res = await api.seedDatabase("demo_user", false);
+        if (!res.success) {
+          if (res.error && res.error.includes("Safety lock active")) {
+            setShowConfirm(true);
+          } else {
+            setToastError(res.error || "Seed endpoint disabled outside development environment");
+          }
+          return;
+        }
+        setSeeded(true);
+        onRefresh();
+        setTimeout(() => setSeeded(false), 3000);
+      } catch (err: any) {
+        console.error(err);
+        setToastError(err.message || "Genuine system failure occurred during seeding.");
+      } finally {
+        setSeeding(false);
+      }
+    } else {
+      setShowConfirm(false);
+      setSeeding(true);
+      try {
+        const res = await api.seedDatabase("demo_user", true);
+        if (!res.success) {
+          setToastError(res.error || "Seeding failed.");
+          return;
+        }
+        setSeeded(true);
+        onRefresh();
+        setTimeout(() => setSeeded(false), 3000);
+      } catch (err: any) {
+        console.error(err);
+        setToastError(err.message || "Genuine system failure occurred during seeding.");
+      } finally {
+        setSeeding(false);
+      }
     }
   };
 
@@ -104,6 +135,40 @@ export default function Navbar({ onRefresh, region, onRegionChange }: NavbarProp
           </button>
         </div>
       </div>
+
+      {showConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="glass-card max-w-sm w-full rounded-3xl p-6 border border-emerald-500/20 bg-background-light dark:bg-background-dark shadow-2xl flex flex-col space-y-4">
+            <div className="flex items-center space-x-3 text-amber-500">
+              <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <h3 className="font-extrabold text-earth-800 dark:text-stone-200 text-xs uppercase tracking-wider">
+                Reset Demo Data
+              </h3>
+            </div>
+            
+            <p className="text-xs text-stone-500 dark:text-stone-400 leading-relaxed">
+              This action will reset demo data and may remove existing records. Continue?
+            </p>
+            
+            <div className="flex items-center justify-end space-x-3 pt-2">
+              <button
+                onClick={() => setShowConfirm(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-stone-500 hover:text-earth-800 dark:text-stone-400 dark:hover:text-white bg-white/5 border border-white/10 dark:border-white/5 hover:bg-white/10 transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleSeed(true)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 border border-emerald-500/20 transition-all cursor-pointer"
+              >
+                Confirm Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

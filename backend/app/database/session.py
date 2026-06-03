@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
 from app.config.config import settings
+from app.utils.logger import log_structured
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -24,14 +25,19 @@ logger = logging.getLogger("carbontracker.database")
 # can start and serve degraded (offline-mode) responses instead of crashing.
 # ─────────────────────────────────────────────────────────────────────────────
 OFFLINE_MODE = False
+READ_ONLY_MODE = False
 
 if not settings.DATABASE_URL:
-    logger.critical(
-        "DATABASE_URL is not configured. Entering OFFLINE SAFE MODE. "
-        "All database operations will use an in-memory SQLite instance. "
-        "Data will not be persisted. Set DATABASE_URL in backend/.env to restore."
+    log_structured(
+        level="CRITICAL",
+        service="database_session",
+        message=(
+            "DATABASE_URL is not configured. Entering READ-ONLY DEGRADED MODE. "
+            "All database writes will be disabled."
+        )
     )
     OFFLINE_MODE = True
+    READ_ONLY_MODE = True
     _DB_URL = "sqlite://"  # In-memory SQLite — ephemeral but allows startup
     engine = create_engine(
         _DB_URL,
@@ -41,9 +47,6 @@ if not settings.DATABASE_URL:
 else:
     try:
         # Create SQLAlchemy engine with resilient connection pooling
-        # pool_recycle: Recycles connections older than 5 minutes (prevents serverless dropouts)
-        # pool_pre_ping: Checks if connection is alive before serving a query
-        # pool_timeout: Limits thread waiting to 15 seconds
         engine = create_engine(
             settings.DATABASE_URL,
             pool_pre_ping=True,
@@ -53,11 +56,14 @@ else:
             pool_timeout=15,
         )
     except Exception as e:
-        logger.critical(
-            f"Failed to create SQLAlchemy engine: {e}. "
-            "Entering OFFLINE SAFE MODE with in-memory SQLite."
+        log_structured(
+            level="CRITICAL",
+            service="database_session",
+            message=f"Failed to create SQLAlchemy engine: {e}. Entering READ-ONLY DEGRADED MODE.",
+            exception=e
         )
         OFFLINE_MODE = True
+        READ_ONLY_MODE = True
         engine = create_engine(
             "sqlite://",
             connect_args={"check_same_thread": False},
@@ -69,61 +75,61 @@ Base = declarative_base()
 
 
 def enter_offline_mode():
-    """Reconfigures the DB sessionmaker to use SQLite in offline safe mode."""
-    global engine, SessionLocal, OFFLINE_MODE
-    logger.critical(
-        "!!! Database connection verification failed after all retries. "
-        "Entering OFFLINE SAFE MODE with in-memory SQLite."
+    """Enters read-only degraded mode without SQLite writes."""
+    global READ_ONLY_MODE
+    log_structured(
+        level="CRITICAL",
+        service="database_session",
+        message=(
+            "!!! Database connection verification failed after all retries. "
+            "Entering READ-ONLY DEGRADED MODE."
+        )
     )
-    OFFLINE_MODE = True
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    SessionLocal.configure(bind=engine)
-    # Create schemas in the fresh in-memory DB
-    Base.metadata.create_all(bind=engine)
-    
-    # Try to seed default factors in the fallback DB
+    READ_ONLY_MODE = True
+    # Try to seed default factors in the fallback DB just in case, but keep writes disabled
     try:
         from app.emissions.factors import seed_db
         db = SessionLocal()
         seed_db(db)
         db.close()
-        logger.info("Successfully seeded default factors in fallback SQLite DB.")
+        log_structured("INFO", "database_session", "Successfully seeded default factors in fallback SQLite DB.")
     except Exception as se:
-        logger.error(f"Failed to seed fallback database: {se}")
+        log_structured("ERROR", "database_session", f"Failed to seed fallback database: {se}", exception=se)
 
-def verify_database_connection(retries: int = 3, base_delay: float = 1.0) -> bool:
+def verify_database_connection(retries: int = 3, base_delay: float = 0.5) -> bool:
     """
     Attempts to connect to the database with a retry loop.
-    Retries 3 times with exponential backoff (e.g. 1s, 2s, 4s).
+    Retries 3 times with exponential backoff (e.g. 0.5s, 1s, 2s).
     Returns True if connection is verified, False otherwise.
     Never raises — always returns bool.
     """
-    if OFFLINE_MODE:
-        logger.warning("Database is in OFFLINE SAFE MODE — skipping connection verification.")
+    global READ_ONLY_MODE
+    if OFFLINE_MODE and READ_ONLY_MODE:
+        log_structured("WARNING", "database_session", "Database is in READ-ONLY DEGRADED MODE — skipping connection verification.")
         return False
 
-    logger.info(f"Verifying PostgreSQL database connection (Retries: {retries})...")
+    log_structured("INFO", "database_session", f"Verifying PostgreSQL database connection (Retries: {retries})...")
     for attempt in range(1, retries + 1):
         try:
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
                 conn.commit()
-            logger.info(">>> PostgreSQL Database connection verified successfully.")
+            log_structured("INFO", "database_session", ">>> PostgreSQL Database connection verified successfully.")
             return True
         except Exception as e:
             delay = base_delay * (2 ** (attempt - 1))
-            logger.warning(
-                f"Database connection attempt {attempt}/{retries} failed. "
-                f"Retrying in {delay:.1f}s... Error: {e}"
+            log_structured(
+                level="WARNING",
+                service="database_session",
+                message=f"Database connection attempt {attempt}/{retries} failed. Retrying in {delay:.1f}s... Error: {e}",
+                exception=e
             )
+            from app.utils.metrics import obs_metrics
+            obs_metrics.increment("db_retries")
             if attempt < retries:
                 time.sleep(delay)
 
-    # All retries failed — enter offline safe mode
+    # All retries failed — enter read-only degraded mode
     enter_offline_mode()
     return False
 
@@ -140,7 +146,7 @@ def get_db():
         try:
             db.close()
         except Exception as e:
-            logger.error(f"Failed to close database session: {e}")
+            log_structured("ERROR", "database_session", f"Failed to close database session: {e}", exception=e)
 
 
 def sync_database_schema(bind_engine) -> None:
@@ -153,7 +159,7 @@ def sync_database_schema(bind_engine) -> None:
         from sqlalchemy import inspect, text as sql_text
         inspector = inspect(bind_engine)
     except Exception as e:
-        logger.error(f"Schema sync: Failed to create inspector: {e}")
+        log_structured("ERROR", "database_session", f"Schema sync: Failed to create inspector: {e}", exception=e)
         return
 
     # 1. Check table "chat_messages"
@@ -166,16 +172,16 @@ def sync_database_schema(bind_engine) -> None:
                     ("semantic_summary", "VARCHAR(1000) NULL"),
                 ]:
                     if col_name not in columns:
-                        logger.info(f"Adding missing column '{col_name}' to 'chat_messages'...")
+                        log_structured("INFO", "database_session", f"Adding missing column '{col_name}' to 'chat_messages'...")
                         try:
                             conn.execute(sql_text(f"ALTER TABLE chat_messages ADD COLUMN {col_name} {col_def}"))
                             conn.commit()
                         except Exception as e:
-                            logger.error(f"Failed to add '{col_name}' to chat_messages: {e}")
+                            log_structured("ERROR", "database_session", f"Failed to add '{col_name}' to chat_messages: {e}", exception=e)
 
                 # context_tags — try JSON first, fallback to TEXT
                 if "context_tags" not in columns:
-                    logger.info("Adding missing column 'context_tags' to 'chat_messages'...")
+                    log_structured("INFO", "database_session", "Adding missing column 'context_tags' to 'chat_messages'...")
                     try:
                         conn.execute(sql_text("ALTER TABLE chat_messages ADD COLUMN context_tags JSON NULL"))
                         conn.commit()
@@ -184,9 +190,9 @@ def sync_database_schema(bind_engine) -> None:
                             conn.execute(sql_text("ALTER TABLE chat_messages ADD COLUMN context_tags TEXT NULL"))
                             conn.commit()
                         except Exception as e2:
-                            logger.error(f"Failed to add context_tags (fallback): {e2}")
+                            log_structured("ERROR", "database_session", f"Failed to add context_tags (fallback): {e2}", exception=e2)
     except Exception as e:
-        logger.error(f"Schema sync failed for chat_messages: {e}")
+        log_structured("ERROR", "database_session", f"Schema sync failed for chat_messages: {e}", exception=e)
 
     # 2. Check table "ai_insights"
     try:
@@ -210,11 +216,11 @@ def sync_database_schema(bind_engine) -> None:
             with bind_engine.connect() as conn:
                 for col_name, col_sql in new_cols.items():
                     if col_name not in columns:
-                        logger.info(f"Adding missing column '{col_name}' to 'ai_insights'...")
+                        log_structured("INFO", "database_session", f"Adding missing column '{col_name}' to 'ai_insights'...")
                         try:
                             conn.execute(sql_text(f"ALTER TABLE ai_insights ADD COLUMN {col_name} {col_sql}"))
                             conn.commit()
                         except Exception as e:
-                            logger.error(f"Failed to add '{col_name}' to ai_insights: {e}")
+                            log_structured("ERROR", "database_session", f"Failed to add '{col_name}' to ai_insights: {e}", exception=e)
     except Exception as e:
-        logger.error(f"Schema sync failed for ai_insights: {e}")
+        log_structured("ERROR", "database_session", f"Schema sync failed for ai_insights: {e}", exception=e)

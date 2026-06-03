@@ -487,12 +487,47 @@ class ApiService {
   // DATABASE SEED
   // ─────────────────────────────────────────────────────────────────────────
 
-  async seedDatabase(username = "demo_user"): Promise<{ status: string; message: string }> {
-    return this.request<{ status: string; message: string }>(
-      `/seed?username=${username}`,
-      { method: "POST" },
-      60_000
-    );
+  async seedDatabase(
+    username = "demo_user",
+    confirm = false
+  ): Promise<{ success: boolean; data?: { status: string; message: string }; error?: string }> {
+    const url = `${BASE_URL}/seed?username=${username}${confirm ? "&confirm=true" : ""}`;
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(url, { method: "POST" }, 60_000);
+    } catch (err: unknown) {
+      // Genuine network timeout/failure -> throw exception
+      throw err;
+    }
+
+    if (response.status === 500) {
+      // Genuine 500 system failure -> throw exception
+      throw new Error("Internal server error during database seed.");
+    }
+
+    let result: any;
+    try {
+      result = await response.json();
+    } catch {
+      // Invalid response -> throw exception
+      throw new Error("Invalid response format from server");
+    }
+
+    // Handle 403 Forbidden or expected safety warnings without throwing exceptions
+    if (!response.ok) {
+      const errorMsg = result.detail || result.error || `HTTP error ${response.status}`;
+      return { success: false, error: errorMsg };
+    }
+
+    if (result && typeof result === "object" && "success" in result) {
+      return {
+        success: result.success,
+        data: result.data,
+        error: result.error,
+      };
+    }
+
+    return { success: true, data: result };
   }
 
   // ─────────────────────────────────────────────────────────────────────────

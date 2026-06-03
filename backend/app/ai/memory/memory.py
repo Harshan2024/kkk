@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from app.models import ChatMessage, UserCorrection
 from app.ai.embeddings.embeddings import get_embedding
+from app.utils.safe_db import safe_commit, safe_query_all, safe_count, DatabaseUnavailableException
 
 def generate_semantic_summary(content: str) -> str:
     """
@@ -16,6 +17,10 @@ def save_chat_message(db: Session, user_id: int, role: str, content: str) -> Cha
     """
     Saves a message in the conversation logs with a semantic vector.
     """
+    from app.database import session as db_session
+    if db_session.READ_ONLY_MODE:
+        raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
+
     summary = generate_semantic_summary(content)
     
     # Generate 8D mock vector and store its hash/id
@@ -41,22 +46,31 @@ def save_chat_message(db: Session, user_id: int, role: str, content: str) -> Cha
         context_tags=tags
     )
     db.add(msg)
-    db.commit()
-    db.refresh(msg)
+    safe_commit(db, "save_chat_message")
+    try:
+        db.refresh(msg)
+    except Exception:
+        pass
     return msg
 
 def get_chat_history(db: Session, user_id: int, limit: int = 15) -> list[ChatMessage]:
     """
     Retrieves the last N messages in the chat conversation history.
     """
-    return db.query(ChatMessage).filter(
-        ChatMessage.user_id == user_id
-    ).order_by(ChatMessage.created_at.desc()).limit(limit).all()
+    return safe_query_all(
+        db.query(ChatMessage).filter(
+            ChatMessage.user_id == user_id
+        ).order_by(ChatMessage.created_at.desc()).limit(limit)
+    )
 
 def record_user_correction(db: Session, user_id: int, original: str, corrected: str, category: str = "nlp_parse") -> UserCorrection:
     """
     Registers a human-in-the-loop correction to improve parsing over time.
     """
+    from app.database import session as db_session
+    if db_session.READ_ONLY_MODE:
+        raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
+
     from app.ai.observability.observability import track_correction
     track_correction() # Update active observability count
     
@@ -68,15 +82,17 @@ def record_user_correction(db: Session, user_id: int, original: str, corrected: 
         created_at=datetime.utcnow()
     )
     db.add(corr)
-    db.commit()
-    db.refresh(corr)
+    safe_commit(db, "record_user_correction")
+    try:
+        db.refresh(corr)
+    except Exception:
+        pass
     return corr
 
 def get_corrections_count(db: Session, user_id: int) -> int:
     """
     Returns total count of user corrections.
     """
-    try:
-        return db.query(UserCorrection).filter(UserCorrection.user_id == user_id).count()
-    except Exception:
-        return 0
+    return safe_count(
+        db.query(UserCorrection).filter(UserCorrection.user_id == user_id)
+    )

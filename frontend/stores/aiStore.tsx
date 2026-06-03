@@ -50,6 +50,7 @@ interface AIContextProps {
   error: string | null;
   toastError: string | null;       // Non-blocking error notification
   clearToastError: () => void;
+  setToastError: (msg: string | null) => void;
 
   setRegion: (r: string) => void;
   loadDashboardData: () => Promise<void>;
@@ -198,9 +199,9 @@ export function AIStoreProvider({
       // All calls failed — show connection error
       try {
         const health = await api.checkHealth();
-        if (health?.database === "disconnected" || health?.database === "offline_safe_mode") {
+        if (health?.database === "disconnected" || health?.database === "offline_safe_mode" || health?.database === "read-only") {
           setError(
-            "Database is offline. Backend is running in safe mode. Connect PostgreSQL to restore full functionality."
+            "Database temporarily unavailable. Read-only mode active."
           );
         } else {
           setError("Unable to load dashboard data. Ensure the backend is running on port 8000.");
@@ -246,6 +247,11 @@ export function AIStoreProvider({
   const logActivity = useCallback(
     async (text: string, activeRegion = "Global") => {
       if (!text.trim()) return;
+
+      if (error === "Database temporarily unavailable. Read-only mode active." || (systemHealth && (systemHealth.database?.status === "read-only" || systemHealth.database?.connected === false))) {
+        setToastError("Database temporarily unavailable. Read-only mode active.");
+        return;
+      }
 
       // 1. Request NLP parse preview for realistic optimistic card
       let calculatedValue = 0.0;
@@ -433,6 +439,10 @@ export function AIStoreProvider({
 
   const uploadReceipt = useCallback(
     async (file: File, activeRegion = "Global") => {
+      if (error === "Database temporarily unavailable. Read-only mode active." || (systemHealth && (systemHealth.database?.status === "read-only" || systemHealth.database?.connected === false))) {
+        setToastError("Database temporarily unavailable. Read-only mode active.");
+        throw new Error("Database temporarily unavailable. Read-only mode active.");
+      }
       try {
         const res = await api.uploadMultimodal(file, username, activeRegion);
         silentDashboardRefresh();
@@ -452,6 +462,10 @@ export function AIStoreProvider({
 
   const submitCorrection = useCallback(
     async (original: string, corrected: string, category = "nlp_parse") => {
+      if (error === "Database temporarily unavailable. Read-only mode active." || (systemHealth && (systemHealth.database?.status === "read-only" || systemHealth.database?.connected === false))) {
+        setToastError("Database temporarily unavailable. Read-only mode active.");
+        return;
+      }
       try {
         await api.correctActivity(original, corrected, category, username);
         fetchMetrics();
@@ -470,6 +484,11 @@ export function AIStoreProvider({
     try {
       const health = await api.getSystemHealth();
       setSystemHealth(health);
+      if (health?.database?.status === "read-only" || health?.database?.status === "offline" || health?.database?.connected === false) {
+        setError("Database temporarily unavailable. Read-only mode active.");
+      } else {
+        setError((prev) => prev === "Database temporarily unavailable. Read-only mode active." ? null : prev);
+      }
     } catch (err) {
       logger.error("aiStore", "fetchSystemHealth failed", err);
     }
@@ -507,6 +526,7 @@ export function AIStoreProvider({
       error,
       toastError,
       clearToastError,
+      setToastError,
       loadDashboardData,
       logActivity,
       chatMessages,
@@ -530,7 +550,7 @@ export function AIStoreProvider({
     }),
     [
       summary, insights, achievements, activities, region, loading, error,
-      toastError, clearToastError, loadDashboardData, logActivity,
+      toastError, clearToastError, setToastError, loadDashboardData, logActivity,
       chatMessages, chatLoading, forecastData, forecastLoading, metrics,
       metricsLoading, isRecording, transcript, fetchChatHistory,
       sendChatMessage, fetchForecast, fetchMetrics, uploadReceipt,

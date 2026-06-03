@@ -15,28 +15,28 @@ from sqlalchemy import text
 
 from app.config.config import settings, validate_environment_on_startup
 from app.api.endpoints import router as api_router
-from app.database.session import engine, SessionLocal, Base, verify_database_connection, sync_database_schema, OFFLINE_MODE
+from app.database.session import engine, SessionLocal, Base, verify_database_connection, sync_database_schema
+from app.database import session as db_session
 from app.emissions.factors import seed_db
 from app.logging.logger import configure_logging
-from app.logging.error_logger import setup_error_logging
+from app.utils.logger import log_structured
 
 # Configure application logging
 configure_logging()
-logger = logging.getLogger("carbontracker.main")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown lifecycle manager."""
-    logger.info("=" * 60)
-    logger.info("CarbonTracker AI Backend — Starting Up")
-    logger.info("=" * 60)
+    log_structured("INFO", "main", "CarbonTracker AI Backend — Starting Up")
 
     # Perform environment verification
     validate_environment_on_startup()
 
-    if OFFLINE_MODE:
-        logger.warning(
+    if db_session.OFFLINE_MODE:
+        log_structured(
+            "WARNING",
+            "main",
             "OFFLINE SAFE MODE ACTIVE — Database not configured. "
             "Backend will start with in-memory SQLite. Data will NOT persist."
         )
@@ -46,25 +46,26 @@ async def lifespan(app: FastAPI):
 
         if db_connected:
             try:
-                logger.info("Running database schema synchronization...")
+                log_structured("INFO", "main", "Running database schema synchronization...")
                 Base.metadata.create_all(bind=engine)
                 sync_database_schema(engine)
-                logger.info(">>> Database schema synchronization completed.")
+                log_structured("INFO", "main", ">>> Database schema synchronization completed.")
             except Exception as e:
-                logger.error(f"Schema synchronization error: {e}. Continuing startup.")
+                log_structured("ERROR", "main", f"Schema synchronization error: {e}. Continuing startup.", exception=e)
         else:
-            logger.warning(
+            log_structured(
+                "WARNING",
+                "main",
                 "PostgreSQL is unreachable. Starting in DEGRADED MODE. "
                 "Activity logging will be unavailable until database is reconnected."
             )
 
-    logger.info("CarbonTracker AI Backend — Ready to serve requests")
-    logger.info("=" * 60)
+    log_structured("INFO", "main", "CarbonTracker AI Backend — Ready to serve requests")
 
     yield
 
     # Shutdown
-    logger.info("CarbonTracker AI Backend — Shutting down gracefully.")
+    log_structured("INFO", "main", "CarbonTracker AI Backend — Shutting down gracefully.")
 
 
 app = FastAPI(
@@ -75,8 +76,78 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Register global centralized exception logger middleware
-setup_error_logging(app)
+# Register global FastAPI exception handler directly
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from app.utils.logger import log_structured, request_id_var
+from app.utils.rate_limiter import RateLimitExceeded
+from app.utils.safe_db import DatabaseUnavailableException
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={
+            "success": False,
+            "error": "Rate limit exceeded",
+            "request_id": request_id_var.get()
+        }
+    )
+
+@app.exception_handler(DatabaseUnavailableException)
+async def database_unavailable_handler(request: Request, exc: DatabaseUnavailableException):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "success": False,
+            "error": "Database temporarily unavailable. Read-only mode active.",
+            "request_id": request_id_var.get()
+        }
+    )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    endpoint = request.url.path
+    method = request.method
+    
+    # Compile log context
+    context = {
+        "endpoint": endpoint,
+        "method": method,
+        "exception_type": type(exc).__name__
+    }
+    
+    # Log using structured logger
+    log_structured(
+        level="ERROR",
+        service="global_exception_handler",
+        message=f"Unhandled exception occurred during request {method} {endpoint}: {str(exc)}",
+        context=context,
+        exception=exc
+    )
+    
+    # Return safe JSON
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": "Internal server error",
+            "message": "An unexpected error occurred.",
+            "request_id": request_id_var.get()
+        }
+    )
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    import secrets
+    req_id = f"REQ-{secrets.token_hex(3).upper()}"
+    token = request_id_var.set(req_id)
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = req_id
+        return response
+    finally:
+        request_id_var.reset(token)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CORS — supports all standard local ports for development
@@ -116,7 +187,7 @@ def health_check():
     db_status = "disconnected"
     stats_status = "error"
 
-    if OFFLINE_MODE:
+    if db_session.OFFLINE_MODE:
         return {
             "backend": "running",
             "mode": "offline_safe",
@@ -135,7 +206,7 @@ def health_check():
         finally:
             db.close()
     except Exception as e:
-        logger.error(f"Health check database validation failed: {e}")
+        log_structured("ERROR", "main", f"Health check database validation failed: {e}", exception=e)
 
     return {
         "backend": "running",
@@ -148,7 +219,7 @@ def health_check():
 @app.get("/api/health/database")
 def health_database():
     """Database-specific health check."""
-    if OFFLINE_MODE:
+    if db_session.OFFLINE_MODE:
         return {"status": "offline_safe_mode", "connected": False, "mode": "sqlite_memory"}
     try:
         db = SessionLocal()
@@ -211,8 +282,8 @@ def get_system_status():
     """
     Unified system status check returning statuses of all components.
     """
-    db_status = "offline_safe_mode" if OFFLINE_MODE else "online"
-    if not OFFLINE_MODE:
+    db_status = "offline_safe_mode" if db_session.OFFLINE_MODE else "online"
+    if not db_session.OFFLINE_MODE:
         try:
             db = SessionLocal()
             db.execute(text("SELECT 1"))
@@ -252,12 +323,23 @@ def get_system_status():
     }
 
 
+@app.get("/debug-error")
+def trigger_debug_error():
+    raise RuntimeError("Triggered unhandled error for verification")
+
+
+@app.get("/observability/metrics")
+def get_flat_observability_metrics():
+    from app.utils.metrics import obs_metrics
+    return obs_metrics.get_metrics()
+
+
 @app.get("/")
 def read_root():
     return {
         "message": "Welcome to CarbonTracker AI",
         "status": "online",
         "version": "2.0.0",
-        "mode": "offline_safe" if OFFLINE_MODE else "online",
+        "mode": "offline_safe" if db_session.OFFLINE_MODE else "online",
         "docs": "/docs",
     }

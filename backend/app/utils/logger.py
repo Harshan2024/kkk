@@ -4,37 +4,58 @@ import json
 import traceback
 from datetime import datetime
 
-# Root logger for CarbonTracker
+import contextvars
+
+# Setup root logger
 root_logger = logging.getLogger("carbontracker")
 
-def log_structured_error(service: str, severity: str, message: str, error: Exception = None):
+# ContextVar to hold current request ID
+request_id_var = contextvars.ContextVar("request_id", default="REQ-SYSTEM")
+
+def log_structured(level: str, service: str, message: str, context: dict = None, exception: Exception = None):
     """
-    Logs structured error details containing timestamp, service, severity, message, and stack trace.
-    Standardized for Fase-3 observability.
+    Centralized logging function.
+    Log structure: timestamp, service, level (severity), message, context, exception (if any), request_id.
     """
-    timestamp = datetime.utcnow().isoformat() + "Z"
-    stack_trace = None
-    if error:
-        stack_trace = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+    timestamp = datetime.utcnow().isoformat()
+    req_id = request_id_var.get()
+    
+    exc_str = None
+    if exception:
+        exc_str = "".join(traceback.format_exception(type(exception), exception, exception.__traceback__))
     elif sys.exc_info()[0]:
-        stack_trace = traceback.format_exc()
-        
+        exc_str = traceback.format_exc()
+
     log_entry = {
         "timestamp": timestamp,
         "service": service,
-        "severity": severity.upper(),
+        "level": level.upper(),
         "message": message,
-        "stack_trace": stack_trace
+        "context": context or {},
+        "request_id": req_id
     }
-    
+    if exc_str:
+        log_entry["exception"] = exc_str
+
     msg_str = json.dumps(log_entry)
     
     # Log to Python standard logging system
-    if severity.lower() == "critical":
+    if level.upper() == "CRITICAL":
         root_logger.critical(msg_str)
-    elif severity.lower() == "error":
+    elif level.upper() == "ERROR":
         root_logger.error(msg_str)
-    elif severity.lower() in ("warn", "warning"):
+    elif level.upper() in ("WARN", "WARNING"):
         root_logger.warning(msg_str)
     else:
         root_logger.info(msg_str)
+
+def log_structured_error(service: str, severity: str, message: str, error: Exception = None):
+    """
+    Legacy compatibility wrapper for log_structured.
+    """
+    log_structured(
+        level=severity,
+        service=service,
+        message=message,
+        exception=error
+    )

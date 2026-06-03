@@ -20,8 +20,7 @@ from app.calculations.engines import (
 )
 from app.utils.safe_db import safe_commit, safe_scalar, safe_query_first, safe_query_all, safe_count
 from app.services.gamification_service import check_and_unlock_achievements_v2
-
-logger = logging.getLogger("carbontracker.activity_service")
+from app.utils.logger import log_structured
 
 
 def get_or_create_user(db: Session, username: str = "demo_user") -> User:
@@ -41,10 +40,10 @@ def get_or_create_user(db: Session, username: str = "demo_user") -> User:
             try:
                 db.refresh(user)
             except Exception as e:
-                logger.error(f"Failed to refresh user after create: {e}")
+                log_structured("ERROR", "activity_service", f"Failed to refresh user after create: {e}", {"username": username}, e)
         return user
     except Exception as e:
-        logger.error(f"get_or_create_user failed for '{username}': {e}")
+        log_structured("ERROR", "activity_service", f"get_or_create_user failed for '{username}': {e}", {"username": username}, e)
         # Return a transient placeholder to keep callers running
         fallback = User(username=username)
         fallback.id = 0
@@ -73,7 +72,7 @@ def calculate_emissions(db: Session, parsed: dict, region: str = "Global") -> tu
         else:
             return calculate_generic_emission(db, category, item, quantity, unit, region=region)
     except Exception as e:
-        logger.error(f"calculate_emissions failed for category='{parsed.get('category')}' item='{parsed.get('item')}': {e}")
+        log_structured("ERROR", "activity_service", f"calculate_emissions failed for category='{parsed.get('category')}' item='{parsed.get('item')}': {e}", {"parsed": parsed}, e)
         return 0.0, {"error": str(e), "fallback": True}
 
 
@@ -90,7 +89,7 @@ def log_activity(db: Session, username: str, text: str, region: str = "Global") 
     try:
         parsed = parse_activity_text(text)
     except Exception as e:
-        logger.error(f"NLP parse failed for text='{text}': {e}. Using safe defaults.")
+        log_structured("ERROR", "activity_service", f"NLP parse failed for text='{text}': {e}. Using safe defaults.", {"text": text}, e)
         parsed = {
             "category": "lifestyle",
             "item": "unknown",
@@ -119,25 +118,25 @@ def log_activity(db: Session, username: str, text: str, region: str = "Global") 
     )
     db.add(activity)
     if not safe_commit(db, "log_activity"):
-        logger.error("Failed to commit activity to database.")
+        log_structured("ERROR", "activity_service", "Failed to commit activity to database.", {"text": text, "username": username})
         return activity
 
     try:
         db.refresh(activity)
     except Exception as e:
-        logger.error(f"Failed to refresh activity after save: {e}")
+        log_structured("ERROR", "activity_service", f"Failed to refresh activity after save: {e}", {"activity_id": activity.id}, e)
 
     # 5. Update daily sustainability score — isolated
     try:
         update_daily_score(db, user.id, date.today())
     except Exception as e:
-        logger.error(f"update_daily_score failed after activity log: {e}")
+        log_structured("ERROR", "activity_service", f"update_daily_score failed after activity log: {e}", {"user_id": user.id}, e)
 
     # 6. Check for achievements — isolated
     try:
         check_and_unlock_achievements_v2(db, user.id, activity)
     except Exception as e:
-        logger.error(f"check_and_unlock_achievements_v2 failed after activity log: {e}")
+        log_structured("ERROR", "activity_service", f"check_and_unlock_achievements_v2 failed after activity log: {e}", {"user_id": user.id}, e)
 
     return activity
 
@@ -198,12 +197,12 @@ def update_daily_score(db: Session, user_id: int, target_date: date) -> Sustaina
         try:
             db.refresh(score_record)
         except Exception as e:
-            logger.error(f"Failed to refresh score_record: {e}")
+            log_structured("ERROR", "activity_service", f"Failed to refresh score_record: {e}", {"user_id": user_id, "date": str(target_date)}, e)
 
         return score_record
 
     except Exception as e:
-        logger.error(f"update_daily_score failed for user_id={user_id} date={target_date}: {e}")
+        log_structured("ERROR", "activity_service", f"update_daily_score failed for user_id={user_id} date={target_date}: {e}", {"user_id": user_id, "date": str(target_date)}, e)
         return None
 
 
@@ -232,7 +231,7 @@ def check_achievements(db: Session, user_id: int, new_activity: Activity) -> lis
                 db.add(ach)
                 unlocked.append(ach)
         except Exception as e:
-            logger.error(f"Achievement unlock check failed for '{name}': {e}")
+            log_structured("ERROR", "activity_service", f"Achievement unlock check failed for '{name}': {e}", {"user_id": user_id, "achievement_name": name}, e)
 
     # Trigger 1: First Log
     total_logs = safe_count(db.query(Activity).filter(Activity.user_id == user_id))
@@ -246,7 +245,7 @@ def check_achievements(db: Session, user_id: int, new_activity: Activity) -> lis
         ]:
             unlock("Green Commuter", "Opted for low-emission transport.", "silver")
     except Exception as e:
-        logger.error(f"Achievement trigger 2 failed: {e}")
+        log_structured("ERROR", "activity_service", f"Achievement trigger 2 failed: {e}", {"user_id": user_id}, e)
 
     # Trigger 3: Plant-Based Meal
     try:
@@ -255,7 +254,7 @@ def check_achievements(db: Session, user_id: int, new_activity: Activity) -> lis
         ]:
             unlock("Plant-based Champion", "Ate a carbon-conscious vegetarian meal.", "silver")
     except Exception as e:
-        logger.error(f"Achievement trigger 3 failed: {e}")
+        log_structured("ERROR", "activity_service", f"Achievement trigger 3 failed: {e}", {"user_id": user_id}, e)
 
     # Trigger 4: Power Saver
     try:
@@ -267,7 +266,7 @@ def check_achievements(db: Session, user_id: int, new_activity: Activity) -> lis
         ):
             unlock("Power Saver", "Used energy-demanding appliances for 1 hour or less.", "bronze")
     except Exception as e:
-        logger.error(f"Achievement trigger 4 failed: {e}")
+        log_structured("ERROR", "activity_service", f"Achievement trigger 4 failed: {e}", {"user_id": user_id}, e)
 
     # Trigger 5: Consistent Logger
     if total_logs >= 5:

@@ -2,7 +2,23 @@ import time
 import logging
 from typing import Dict, List, Any
 
-logger = logging.getLogger("carbontracker.ai.observability")
+from app.utils.logger import log_structured
+
+class StructuredLoggerWrapper:
+    def __init__(self, service_name: str):
+        self.service_name = service_name
+    def info(self, msg: str):
+        log_structured("INFO", self.service_name, msg)
+    def warning(self, msg: str):
+        log_structured("WARNING", self.service_name, msg)
+    def error(self, msg: str):
+        import sys
+        _, exc, _ = sys.exc_info()
+        log_structured("ERROR", self.service_name, msg, exception=exc)
+    def critical(self, msg: str):
+        log_structured("CRITICAL", self.service_name, msg)
+
+logger = StructuredLoggerWrapper("ai_observability")
 
 # Global in-memory metrics store for simplicity in Phase-3
 _METRICS = {

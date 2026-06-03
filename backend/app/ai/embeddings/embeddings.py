@@ -14,11 +14,21 @@ CONCEPT_KEYWORDS = [
     ["office", "college", "work", "meeting", "flight", "travelled"]                                                            # Business/Travel context
 ]
 
+from app.utils.circuit_breaker import breakers
+
 def get_embedding(text: str) -> List[float]:
     """
     Generates a deterministic 8-dimensional semantic concept vector for any text.
-    Failsafe and lightweight with robust try-except fallbacks.
+    Failsafe and lightweight, wrapped in a circuit breaker.
     """
+    try:
+        return breakers["embeddings"].call(_get_embedding, text)
+    except Exception:
+        # Return uniform vector if breaker is open or calculation fails
+        return [1.0 / math.sqrt(8.0)] * 8
+
+def _get_embedding(text: str) -> List[float]:
+    """Internal implementation of concept vector generation."""
     try:
         text_clean = text.lower().strip()
         vector = [0.0] * 8
@@ -41,7 +51,6 @@ def get_embedding(text: str) -> List[float]:
     except Exception:
         pass
         
-    # Return uniform vector if no keywords match or calculation fails
     return [1.0 / math.sqrt(8.0)] * 8
 
 

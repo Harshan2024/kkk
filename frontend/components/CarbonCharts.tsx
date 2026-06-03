@@ -221,62 +221,69 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
                 </div>
               ) : null}
               
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={forecastData} margin={{ top: 10, right: 5, left: -25, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorForecast" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#d97706" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#d97706" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="date" stroke="#64748b" fontSize={9} tickLine={false} />
-                  <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
-                  <ChartTooltip content={<CustomTooltip />} />
-                  {/* Pessimistic Boundary */}
-                  <Area
-                    type="monotone"
-                    dataKey="pessimistic"
-                    name="Pessimistic Forecast"
-                    stroke="#f43f5e"
-                    strokeWidth={1.5}
-                    strokeDasharray="4 4"
-                    fill="none"
-                  />
-                  {/* Expected Path */}
-                  <Area
-                    type="monotone"
-                    dataKey="expected"
-                    name="Expected Path"
-                    stroke="#d97706"
-                    strokeWidth={2.5}
-                    fillOpacity={1}
-                    fill="url(#colorForecast)"
-                  />
-                  {/* Optimistic Boundary */}
-                  <Area
-                    type="monotone"
-                    dataKey="optimistic"
-                    name="Optimistic Target"
-                    stroke="#10b981"
-                    strokeWidth={1.5}
-                    strokeDasharray="4 4"
-                    fill="none"
-                  />
-                  <ReferenceLine
-                    y={5.0}
-                    stroke="#ef4444"
-                    strokeDasharray="4 4"
-                    label={{
-                      value: "Limit (5kg)",
-                      position: "top",
-                      fill: "#ef4444",
-                      fontSize: 9,
-                      fontWeight: "bold",
-                    }}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              {!forecastLoading && (!forecastData || forecastData.length === 0) ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-stone-950/40 rounded-2xl border border-dashed border-white/5">
+                  <span className="text-xs font-black text-amber-550 uppercase tracking-widest">AI service temporarily unavailable</span>
+                  <span className="text-[9px] text-stone-500 font-bold uppercase tracking-wider mt-1">Please try again later</span>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={forecastData} margin={{ top: 10, right: 5, left: -25, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorForecast" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#d97706" stopOpacity={0.25} />
+                        <stop offset="95%" stopColor="#d97706" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="date" stroke="#64748b" fontSize={9} tickLine={false} />
+                    <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
+                    <ChartTooltip content={<CustomTooltip />} />
+                    {/* Pessimistic Boundary */}
+                    <Area
+                      type="monotone"
+                      dataKey="pessimistic"
+                      name="Pessimistic Forecast"
+                      stroke="#f43f5e"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 4"
+                      fill="none"
+                    />
+                    {/* Expected Path */}
+                    <Area
+                      type="monotone"
+                      dataKey="expected"
+                      name="Expected Path"
+                      stroke="#d97706"
+                      strokeWidth={2.5}
+                      fillOpacity={1}
+                      fill="url(#colorForecast)"
+                    />
+                    {/* Optimistic Boundary */}
+                    <Area
+                      type="monotone"
+                      dataKey="optimistic"
+                      name="Optimistic Target"
+                      stroke="#10b981"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 4"
+                      fill="none"
+                    />
+                    <ReferenceLine
+                      y={5.0}
+                      stroke="#ef4444"
+                      strokeDasharray="4 4"
+                      label={{
+                        value: "Limit (5kg)",
+                        position: "top",
+                        fill: "#ef4444",
+                        fontSize: 9,
+                        fontWeight: "bold",
+                      }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
             </div>
           )}
         </div>
