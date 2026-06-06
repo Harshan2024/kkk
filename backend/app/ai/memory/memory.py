@@ -16,16 +16,35 @@ def generate_semantic_summary(content: str) -> str:
 def save_chat_message(db: Session, user_id: int, role: str, content: str) -> ChatMessage:
     """
     Saves a message in the conversation logs with a semantic vector.
+    Enforces a maximum of 20 messages per user by automatically deleting oldest entries.
     """
     from app.database import session as db_session
+    import logging
+    logger = logging.getLogger("carbontracker.ai.memory")
+    
     if db_session.READ_ONLY_MODE:
         raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
 
+    # Enforce memory limit: keep only the last 19 messages (so adding this one makes 20)
+    try:
+        existing_count = db.query(ChatMessage).filter(ChatMessage.user_id == user_id).count()
+        if existing_count >= 20:
+            recent_ids = db.query(ChatMessage.id).filter(
+                ChatMessage.user_id == user_id
+            ).order_by(ChatMessage.created_at.desc()).limit(19).all()
+            recent_ids = [r[0] for r in recent_ids]
+            
+            db.query(ChatMessage).filter(
+                ChatMessage.user_id == user_id,
+                ~ChatMessage.id.in_(recent_ids)
+            ).delete(synchronize_session=False)
+    except Exception as prune_err:
+        logger.warning(f"Failed to prune chat history for user {user_id}: {prune_err}")
+
     summary = generate_semantic_summary(content)
     
-    # Generate 8D mock vector and store its hash/id
-    embedding = get_embedding(content)
-    embedding_str = ",".join(str(x) for x in embedding)
+    # Store static dummy coordinates to operate without embeddings/vector calculations
+    embedding_str = "0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0"
     
     # Detect context tags from content
     tags = []

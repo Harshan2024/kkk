@@ -93,7 +93,7 @@ def run_db_with_retry(
                 # Activate read-only degraded mode
                 if not db_session.READ_ONLY_MODE:
                     db_session.READ_ONLY_MODE = True
-                    obs_metrics.increment("degraded_mode_activations")
+                    obs_metrics.increment("recovery_mode_activations")
                 
                 if is_write:
                     raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")

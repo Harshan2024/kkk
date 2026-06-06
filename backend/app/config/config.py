@@ -45,27 +45,29 @@ def validate_environment_on_startup():
     Validates required environment variables and outputs warnings if any are missing.
     Never crashes the application startup.
     """
+    import sys
     import logging
     logger = logging.getLogger("carbontracker.config")
     
-    required_variables = {
-        "DATABASE_URL": settings.DATABASE_URL,
-        "SECRET_KEY": os.getenv("SECRET_KEY"),
-        "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY")
+    vars_to_check = {
+        "DATABASE_URL": (os.getenv("DATABASE_URL"), "Database services disabled."),
+        "SECRET_KEY": (os.getenv("SECRET_KEY"), "Authentication services disabled."),
+        "OPENAI_API_KEY": (os.getenv("OPENAI_API_KEY"), "AI services disabled."),
+        "ENVIRONMENT": (os.getenv("ENVIRONMENT"), "Environment mode defaults to development.")
     }
     
-    missing = []
-    for var_name, var_val in required_variables.items():
+    has_missing = False
+    for var_name, (var_val, service_desc) in vars_to_check.items():
         if not var_val:
-            missing.append(var_name)
+            # Construct exact warning block
+            warning_msg = f"\nWARNING\n\n{var_name} missing.\n\n{service_desc}\n"
+            # Print to stdout/stderr
+            print(warning_msg, file=sys.stderr, flush=True)
+            # Log structured warning
+            logger.warning(f"{var_name} missing. {service_desc}")
+            has_missing = True
             
-    if missing:
-        logger.warning(
-            f"=== ENVIRONMENT WARNING ===\n"
-            f"The following environment variables are missing: {', '.join(missing)}.\n"
-            f"Some system integrations (PostgreSQL, OAuth, or OpenAI) may run in degraded mode.\n"
-            f"==========================="
-        )
-    else:
+    if not has_missing:
         logger.info("All required environment variables verified successfully.")
+
 

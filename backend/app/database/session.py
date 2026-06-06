@@ -85,7 +85,15 @@ def enter_offline_mode():
             "Entering READ-ONLY DEGRADED MODE."
         )
     )
-    READ_ONLY_MODE = True
+    if not READ_ONLY_MODE:
+        READ_ONLY_MODE = True
+        try:
+            from app.utils.metrics import obs_metrics
+            obs_metrics.increment("recovery_mode_activations")
+        except Exception:
+            pass
+    else:
+        READ_ONLY_MODE = True
     # Try to seed default factors in the fallback DB just in case, but keep writes disabled
     try:
         from app.emissions.factors import seed_db

@@ -589,6 +589,8 @@ def post_chat_query(payload: ChatRequest, request: Request, db: Session = Depend
         response = orchestrate_chat_response(db, payload.username, user.id, payload.message)
         return {
             "success": True,
+            "response": response,
+            "timestamp": datetime.utcnow().isoformat(),
             "data": {"response": response},
             "error": None
         }
@@ -596,6 +598,8 @@ def post_chat_query(payload: ChatRequest, request: Request, db: Session = Depend
         logger.error(f"Chat execution failed: {str(e)}\n{traceback.format_exc()}")
         return {
             "success": False,
+            "response": "Companion currently offline. Ask me about travel, food, or electricity items later!",
+            "timestamp": datetime.utcnow().isoformat(),
             "data": {"response": "Companion currently offline. Ask me about travel, food, or electricity items later!"},
             "error": f"Copilot dialogue failed: {str(e)}"
         }

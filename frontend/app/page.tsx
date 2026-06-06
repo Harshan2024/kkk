@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Sparkles } from "lucide-react";
+import { X, Sparkles, MessageSquare } from "lucide-react";
 
 import Sidebar from "../components/Sidebar";
 import Topbar from "../components/Topbar";
@@ -18,7 +18,11 @@ import CarbonCharts from "../components/CarbonCharts";
 import AIRecommendations from "../components/AIRecommendations";
 import Achievements from "../components/Achievements";
 import ActivityHistory from "../components/ActivityHistory";
-import CopilotChat from "../components/CopilotChat";
+import dynamic from "next/dynamic";
+const CopilotChat = dynamic(() => import("../components/CopilotChat"), {
+  loading: () => null,
+  ssr: false,
+});
 import MultimodalUpload from "../components/MultimodalUpload";
 import SystemStatusWidget from "../components/SystemStatusWidget";
 import ErrorBoundary from "../components/ErrorBoundary";
@@ -92,10 +96,18 @@ function HomeContent() {
     region,
     setRegion,
     loadDashboardData,
+    metrics,
   } = useAIStore();
 
   const [currentTab, setCurrentTab] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isCopilotOpen, setIsCopilotOpen] = useState(false);
+
+  useEffect(() => {
+    const handleOpen = () => setIsCopilotOpen(true);
+    window.addEventListener("open-copilot", handleOpen);
+    return () => window.removeEventListener("open-copilot", handleOpen);
+  }, []);
 
   // Memoized gamification values — only recalculate when dependencies change
   const { xp, level, streak } = useMemo(() => {
@@ -182,22 +194,29 @@ function HomeContent() {
               {/* Greeting row */}
               <motion.div
                 variants={itemVariants}
-                className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 select-none"
+                className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start select-none"
               >
-                <div>
+                <div className="md:col-span-2">
                   <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-1.5">
                     Good evening, <span className="text-emerald-400">Harshan R</span> 👋
                   </h1>
                   <p className="text-[11px] font-bold text-stone-500 mt-1">
                     &ldquo;Small choices today, a better planet tomorrow.&rdquo; 🌿
                   </p>
+                  <div className="mt-4">
+                    <button
+                      onClick={() => alert("Grid map telemetry synced. Loading Carbon Density overlays...")}
+                      className="px-4 py-2 border border-amber-500/25 bg-amber-500/5 hover:bg-amber-500/10 rounded-xl text-[10px] font-black uppercase text-amber-400 tracking-wider transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow shadow-amber-500/5"
+                    >
+                      🗺️ View Heatmap
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={() => alert("Grid map telemetry synced. Loading Carbon Density overlays...")}
-                  className="px-4 py-2 border border-amber-500/25 bg-amber-500/5 hover:bg-amber-500/10 rounded-xl text-[10px] font-black uppercase text-amber-400 tracking-wider transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow shadow-amber-500/5"
-                >
-                  🗺️ View Heatmap
-                </button>
+                <div className="md:col-span-1">
+                  <ErrorBoundary>
+                    <SystemStatusWidget />
+                  </ErrorBoundary>
+                </div>
               </motion.div>
 
               {/* Quick Actions Bar */}
@@ -307,9 +326,6 @@ function HomeContent() {
                 <div className="xl:col-span-1 space-y-4">
                   <ErrorBoundary>
                     <EarthPanel score={summary?.current_score ?? 93} />
-                  </ErrorBoundary>
-                  <ErrorBoundary>
-                    <SystemStatusWidget />
                   </ErrorBoundary>
                 </div>
                 <div className="xl:col-span-2 space-y-5">
@@ -455,9 +471,31 @@ function HomeContent() {
         </main>
       </div>
 
-      {/* Floating AI Copilot — isolated boundary */}
+      {/* Floating AI Copilot Toggle & Lazy-loaded Panel */}
+      {!isCopilotOpen && (
+        <div className="fixed bottom-6 right-6 z-40">
+          <motion.button
+            whileHover={{ scale: 1.06 }}
+            whileTap={{ scale: 0.94 }}
+            onClick={() => setIsCopilotOpen(true)}
+            className="relative flex items-center justify-center w-14 h-14 rounded-full bg-forest-600 hover:bg-forest-500 text-white shadow-xl shadow-forest-600/35 cursor-pointer overflow-hidden border border-forest-500/30 glow-btn"
+          >
+            <MessageSquare className="w-6 h-6" />
+            {metrics && metrics.total_user_corrections > 0 && (
+              <span className="absolute top-1 right-1 bg-amber-500 text-black text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center">
+                {metrics.total_user_corrections}
+              </span>
+            )}
+          </motion.button>
+        </div>
+      )}
+
       <ErrorBoundary>
-        <CopilotChat />
+        <AnimatePresence>
+          {isCopilotOpen && (
+            <CopilotChat onClose={() => setIsCopilotOpen(false)} />
+          )}
+        </AnimatePresence>
       </ErrorBoundary>
 
       {/* Non-blocking toast error notification */}

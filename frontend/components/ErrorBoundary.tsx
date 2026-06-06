@@ -3,6 +3,8 @@
 import React, { Component, ErrorInfo, ReactNode } from "react";
 import { ShieldAlert, RefreshCw } from "lucide-react";
 
+import { logger } from "../utils/logger";
+
 interface Props {
   children?: ReactNode;
 }
@@ -23,7 +25,10 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("Uncaught error inside CarbonTracker dashboard:", error, errorInfo);
+    logger.error("ErrorBoundary", `React rendering exception caught: ${error.message}`, { 
+      error: error.toString(), 
+      errorInfo 
+    });
   }
 
   private handleReset = () => {

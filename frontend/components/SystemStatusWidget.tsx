@@ -20,7 +20,7 @@ function getStatusConfig(status: string | undefined): {
   icon: typeof CheckCircle2;
 } {
   const s = (status || "unknown").toLowerCase();
-  if (s === "healthy" || s === "ok" || s === "connected" || s === "working")
+  if (s === "healthy" || s === "ok" || s === "connected" || s === "working" || s === "online")
     return { label: "Online", color: "text-emerald-400", dot: "bg-emerald-500", icon: CheckCircle2 };
   if (s === "degraded" || s === "offline_safe_mode" || s === "unavailable")
     return { label: "Degraded", color: "text-amber-400", dot: "bg-amber-500", icon: AlertCircle };
@@ -41,9 +41,8 @@ const StatusRow = memo(function StatusRow({
   status: string | undefined;
 }) {
   const cfg = getStatusConfig(status);
-  const StatusIcon = cfg.icon;
   return (
-    <div className="flex items-center justify-between py-1.5 border-b border-white/[0.03] last:border-b-0">
+    <div className="flex items-center justify-between py-1 border-b border-white/[0.03] last:border-b-0">
       <div className="flex items-center gap-2">
         <div className="w-5 h-5 rounded-md bg-white/[0.03] flex items-center justify-center">
           <Icon className="w-3 h-3 text-stone-500" />
@@ -91,33 +90,44 @@ export default memo(function SystemStatusWidget() {
         </button>
       </div>
 
-      <div className="space-y-0">
-        <StatusRow
-          icon={Cpu}
-          label="Backend"
-          status={systemHealth ? "healthy" : "unknown"}
-        />
-        <StatusRow
-          icon={Database}
-          label="Database"
-          status={systemHealth?.database?.status}
-        />
-        <StatusRow
-          icon={Cpu}
-          label="AI Engine"
-          status={systemHealth?.ai?.status}
-        />
-        <StatusRow
-          icon={Camera}
-          label="OCR"
-          status={systemHealth?.ocr?.status}
-        />
-        <StatusRow
-          icon={Wifi}
-          label="IoT"
-          status={systemHealth?.iot?.status}
-        />
-      </div>
+      {systemHealth?.failed ? (
+        <div className="text-stone-500 text-[10px] font-bold text-center py-4 border border-dashed border-white/5 rounded-xl bg-white/[0.01]">
+          System status temporarily unavailable.
+        </div>
+      ) : (
+        <div className="space-y-0.5">
+          <StatusRow
+            icon={Cpu}
+            label="Backend"
+            status={systemHealth?.backend}
+          />
+          <StatusRow
+            icon={Database}
+            label="Database"
+            status={systemHealth?.database}
+          />
+          <StatusRow
+            icon={Cpu}
+            label="AI Engine"
+            status={systemHealth?.ai}
+          />
+          <StatusRow
+            icon={Camera}
+            label="OCR Service"
+            status={systemHealth?.ocr}
+          />
+          <StatusRow
+            icon={Database}
+            label="Cache"
+            status={systemHealth?.cache}
+          />
+          <StatusRow
+            icon={Wifi}
+            label="IoT Service"
+            status={systemHealth?.iot}
+          />
+        </div>
+      )}
     </div>
   );
 });

@@ -14,12 +14,30 @@ interface Device {
   consumption: string;
 }
 
+import { useAIStore } from "../stores/aiStore";
+
 export default function IoTDashboard() {
+  const { systemHealth } = useAIStore();
+  const iotStatus = systemHealth?.iot;
+
   // Live IoT telemetry states
   const [voltage, setVoltage] = useState(230.1);
   const [current, setCurrent] = useState(4.52);
   const [cumulativeEnergy, setCumulativeEnergy] = useState(15.204);
   const [lastTickTime, setLastTickTime] = useState("");
+
+  // 1. Error State (IoT Offline)
+  if (iotStatus === "offline") {
+    return (
+      <div className="glass-card rounded-3xl p-6 sm:p-8 min-h-[400px] flex flex-col items-center justify-center select-none text-center relative border border-rose-500/20 bg-rose-500/10">
+        <span className="text-xs font-black uppercase tracking-wider text-rose-400">
+          Device connection unavailable.
+        </span>
+      </div>
+    );
+  }
+
+  const showDegraded = iotStatus === "degraded";
 
   // Simulated telemetry loop representing active WebSocket/MQTT messages
   useEffect(() => {
@@ -107,10 +125,16 @@ export default function IoTDashboard() {
           <h2 className="text-lg font-black uppercase tracking-wider text-white">Smart IoT Devices</h2>
           <p className="text-[10px] text-stone-550 font-bold uppercase tracking-wider mt-0.5">Live energy telemetry and hardware orchestration</p>
         </div>
-        <div className="flex items-center space-x-2 text-[9px] text-emerald-450 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-lg font-black uppercase tracking-wider animate-pulse">
-          <RefreshCw className="w-3 h-3 animate-spin" />
-          <span>Real-time feed active: {lastTickTime}</span>
-        </div>
+        {showDegraded ? (
+          <div className="flex items-center space-x-2 text-[9px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg font-black uppercase tracking-wider animate-pulse">
+            <span>Running in degraded mode.</span>
+          </div>
+        ) : (
+          <div className="flex items-center space-x-2 text-[9px] text-emerald-450 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-lg font-black uppercase tracking-wider animate-pulse">
+            <RefreshCw className="w-3 h-3 animate-spin" />
+            <span>Real-time feed active: {lastTickTime}</span>
+          </div>
+        )}
       </div>
 
       {/* Grid: Status checklist on left, Live values in center/right */}

@@ -66,7 +66,9 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
   const [activeTab, setActiveTab] = useState<"historical" | "forecast">("historical");
   const [selectedModel, setSelectedModel] = useState("prophet");
   
-  const { forecastData, forecastLoading, fetchForecast } = useAIStore();
+  const { forecastData, forecastLoading, fetchForecast, systemHealth } = useAIStore();
+  const dbStatus = systemHealth?.database;
+  const aiStatus = systemHealth?.ai;
 
   // Prevent SSR hydration errors with Recharts SVG rendering
   useEffect(() => {
@@ -75,16 +77,32 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
 
   // Fetch forecast when model changes
   useEffect(() => {
-    if (isMounted && activeTab === "forecast") {
+    if (isMounted && activeTab === "forecast" && aiStatus !== "offline") {
       fetchForecast(selectedModel);
     }
-  }, [selectedModel, activeTab, isMounted]);
+  }, [selectedModel, activeTab, isMounted, aiStatus]);
 
-  if (!summary || !isMounted) {
+  // 1. Error State (Database Offline)
+  if (dbStatus === "offline") {
+    return (
+      <div className="relative grid grid-cols-1 lg:grid-cols-2 gap-6 w-full min-h-[420px]">
+        <div className="absolute inset-0 z-20 glass-card rounded-3xl flex items-center justify-center border border-rose-500/20 bg-rose-500/10">
+          <span className="text-xs font-black uppercase tracking-wider text-rose-400">
+            Service temporarily unavailable.
+          </span>
+        </div>
+        <div className="glass-card rounded-3xl h-[420px] opacity-20 border-white/5 bg-white/[0.01]"></div>
+        <div className="glass-card rounded-3xl h-[420px] opacity-20 border-white/5 bg-white/[0.01]"></div>
+      </div>
+    );
+  }
+
+  // 2. Loading State
+  if (!summary || !isMounted || (!systemHealth && dbStatus !== "offline")) {
     return (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full animate-pulse">
-        <div className="glass-card rounded-3xl h-96 bg-white/5"></div>
-        <div className="glass-card rounded-3xl h-96 bg-white/5"></div>
+        <div className="glass-card rounded-3xl h-[420px] bg-white/5 border-white/5"></div>
+        <div className="glass-card rounded-3xl h-[420px] bg-white/5 border-white/5"></div>
       </div>
     );
   }
@@ -106,6 +124,19 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
       };
     });
 
+  // 3. Empty State (no trends and no pie data)
+  if (trends.length === 0 && pieData.length === 0) {
+    return (
+      <div className="glass-card rounded-3xl p-6 border border-white/5 bg-white/[0.01] flex items-center justify-center min-h-[420px] w-full">
+        <span className="text-xs font-black uppercase tracking-wider text-stone-500">
+          No data available.
+        </span>
+      </div>
+    );
+  }
+
+  const showDegraded = dbStatus === "degraded" || aiStatus === "degraded";
+
 
   // Format habit grid grid cells (past 7 days)
   const getGridColor = (score: number) => {
@@ -118,7 +149,12 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
       {/* CHART 1: Historical Trend or AI Forecasting (Tabbed Card) */}
-      <div className="glass-card rounded-3xl p-5 sm:p-6 transition-all duration-300 flex flex-col justify-between h-[420px]">
+      <div className="glass-card rounded-3xl p-5 sm:p-6 transition-all duration-300 flex flex-col justify-between h-[420px] relative">
+        {showDegraded && (
+          <div className="absolute top-2 right-2 z-20 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-[8px] font-black uppercase tracking-wider text-amber-450 animate-pulse">
+            Running in degraded mode.
+          </div>
+        )}
         <div>
           {/* Tabs header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-white/10 dark:border-white/5 mb-4 gap-3">
@@ -221,10 +257,9 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
                 </div>
               ) : null}
               
-              {!forecastLoading && (!forecastData || forecastData.length === 0) ? (
+              {aiStatus === "offline" || (!forecastLoading && (!forecastData || forecastData.length === 0)) ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-stone-950/40 rounded-2xl border border-dashed border-white/5">
-                  <span className="text-xs font-black text-amber-550 uppercase tracking-widest">AI service temporarily unavailable</span>
-                  <span className="text-[9px] text-stone-500 font-bold uppercase tracking-wider mt-1">Please try again later</span>
+                  <span className="text-xs font-black text-rose-400 uppercase tracking-widest">AI service temporarily unavailable.</span>
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
@@ -290,7 +325,12 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
       </div>
 
       {/* CHART 2: Category Breakdown Pie Chart & Habit Grid */}
-      <div className="glass-card rounded-3xl p-5 sm:p-6 transition-all duration-300 flex flex-col justify-between h-[420px]">
+      <div className="glass-card rounded-3xl p-5 sm:p-6 transition-all duration-300 flex flex-col justify-between h-[420px] relative">
+        {showDegraded && (
+          <div className="absolute top-2 right-2 z-20 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-[8px] font-black uppercase tracking-wider text-amber-450 animate-pulse">
+            Running in degraded mode.
+          </div>
+        )}
         <div>
           <div className="flex items-center justify-between mb-4 border-b border-white/10 dark:border-white/5 pb-3">
             <div className="flex items-center space-x-2">

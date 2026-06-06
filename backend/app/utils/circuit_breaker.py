@@ -39,7 +39,10 @@ class CircuitBreaker:
                         message=f"Circuit breaker '{self.name}' transitioned to HALF-OPEN. Attempting test call."
                     )
                 else:
-                    obs_metrics.increment("service_failures")
+                    if self.name == "ocr":
+                        obs_metrics.increment("ocr_failures")
+                    else:
+                        obs_metrics.increment("ai_failures")
                     raise CircuitBreakerOpenException(self.name, "Service temporarily unavailable")
 
         # Execute func in executor with specified timeout
@@ -75,13 +78,17 @@ class CircuitBreaker:
                         exception=e
                     )
                 else:
-                    obs_metrics.increment("service_failures")
                     log_structured(
                         level="ERROR",
                         service=f"circuit_breaker:{self.name}",
                         message=f"Service call failed in circuit breaker '{self.name}': {e}",
                         exception=e
                     )
+                
+                if self.name == "ocr":
+                    obs_metrics.increment("ocr_failures")
+                else:
+                    obs_metrics.increment("ai_failures")
                 
                 if self.failure_count >= self.failure_threshold and self.state != "OPEN":
                     self.state = "OPEN"

@@ -24,12 +24,40 @@ const INSIGHT_ICONS: Record<string, { icon: any; color: string; bg: string }> = 
   food: { icon: Leaf, color: "text-emerald-450", bg: "bg-emerald-950/20 border-emerald-500/20" }
 };
 
+import { useAIStore } from "../stores/aiStore";
+
 export default function AIRecommendations({ insights, loading }: AIRecommendationsProps) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const { systemHealth } = useAIStore();
+  const dbStatus = systemHealth?.database;
+  const aiStatus = systemHealth?.ai;
 
   const toggleExpand = (id: number) => {
     setExpandedId(expandedId === id ? null : id);
   };
+
+  // 1. Error State (AI or DB Offline)
+  if (dbStatus === "offline" || aiStatus === "offline") {
+    return (
+      <div className="glass-card rounded-3xl p-5 sm:p-6 transition-all duration-300 flex flex-col justify-between h-[360px] select-none">
+        <div>
+          <div className="flex items-center space-x-2.5 pb-3 border-b border-white/5 mb-3">
+            <div className="w-6 h-6 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-450" />
+            </div>
+            <h3 className="font-extrabold text-xs text-stone-300 uppercase tracking-widest">
+              AI Insights
+            </h3>
+          </div>
+          <div className="flex flex-col items-center justify-center min-h-[200px] border border-dashed border-white/5 rounded-2xl bg-white/[0.01]">
+            <span className="text-xs font-black uppercase tracking-wider text-rose-400">
+              AI service temporarily unavailable.
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Mock insights mirroring the mockup layout if empty
   const defaultInsights = [
@@ -75,6 +103,7 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
   ];
 
   const activeInsights = insights && insights.length > 0 ? insights.slice(0, 3) : defaultInsights;
+  const showDegraded = dbStatus === "degraded" || aiStatus === "degraded";
 
   return (
     <div className="glass-card rounded-3xl p-5 sm:p-6 transition-all duration-300 flex flex-col justify-between h-[360px] select-none">
@@ -89,9 +118,15 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
               AI Insights
             </h3>
           </div>
-          <span className="text-[9px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">
-            New
-          </span>
+          {showDegraded ? (
+            <span className="text-[8px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider animate-pulse">
+              Running in degraded mode.
+            </span>
+          ) : (
+            <span className="text-[9px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">
+              New
+            </span>
+          )}
         </div>
 
         {/* Recommendations list */}
@@ -100,6 +135,12 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
             {[1, 2, 3].map((i) => (
               <div key={i} className="h-16 rounded-2xl bg-white/5 border-white/5"></div>
             ))}
+          </div>
+        ) : activeInsights.length === 0 ? (
+          <div className="flex items-center justify-center min-h-[200px]">
+            <span className="text-xs font-black uppercase tracking-wider text-stone-500">
+              No data available.
+            </span>
           </div>
         ) : (
           <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">

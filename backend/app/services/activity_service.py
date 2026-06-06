@@ -23,11 +23,15 @@ from app.services.gamification_service import check_and_unlock_achievements_v2
 from app.utils.logger import log_structured
 
 
+USER_CACHE = {}
+
 def get_or_create_user(db: Session, username: str = "demo_user") -> User:
     """
     Retrieves or creates a guest/demo user. Never raises.
     Returns a safe User object; on failure returns a transient User with id=0.
     """
+    if username in USER_CACHE:
+        return USER_CACHE[username]
     try:
         user = safe_query_first(db.query(User).filter(User.username == username))
         if not user:
@@ -41,6 +45,8 @@ def get_or_create_user(db: Session, username: str = "demo_user") -> User:
                 db.refresh(user)
             except Exception as e:
                 log_structured("ERROR", "activity_service", f"Failed to refresh user after create: {e}", {"username": username}, e)
+        if user and user.id != 0:
+            USER_CACHE[username] = user
         return user
     except Exception as e:
         log_structured("ERROR", "activity_service", f"get_or_create_user failed for '{username}': {e}", {"username": username}, e)

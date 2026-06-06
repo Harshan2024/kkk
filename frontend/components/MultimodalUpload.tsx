@@ -10,7 +10,10 @@ interface MultimodalUploadProps {
 }
 
 export default function MultimodalUpload({ onUploadSuccess, region }: MultimodalUploadProps) {
-  const { uploadReceipt } = useAIStore();
+  const { uploadReceipt, systemHealth } = useAIStore();
+  const ocrOffline = systemHealth?.ocr === "offline";
+  const ocrDegraded = systemHealth?.ocr === "degraded";
+
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -160,7 +163,7 @@ export default function MultimodalUpload({ onUploadSuccess, region }: Multimodal
 
           <button
             onClick={handleUploadSubmit}
-            disabled={loading}
+            disabled={loading || ocrOffline}
             className="w-full py-2.5 bg-forest-600 hover:bg-forest-500 disabled:opacity-50 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center space-x-2 shadow-lg shadow-forest-600/15 cursor-pointer"
           >
             {loading ? (
@@ -180,6 +183,22 @@ export default function MultimodalUpload({ onUploadSuccess, region }: Multimodal
         <div className="mt-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-550 dark:text-rose-450 text-xs font-semibold flex items-center space-x-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           <span>{error}</span>
+        </div>
+      )}
+
+      {/* OCR Offline feedback */}
+      {ocrOffline && (
+        <div className="mt-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-550 dark:text-rose-450 text-xs font-semibold flex items-center space-x-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>OCR service temporarily unavailable.</span>
+        </div>
+      )}
+
+      {/* OCR Degraded feedback */}
+      {ocrDegraded && (
+        <div className="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-550 dark:text-amber-450 text-xs font-semibold flex items-center space-x-2 animate-pulse">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>Running in degraded mode.</span>
         </div>
       )}
 

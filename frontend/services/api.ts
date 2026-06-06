@@ -198,10 +198,13 @@ export interface HealthStatus {
 }
 
 export interface SystemHealth {
-  database: { status: string; connected?: boolean; error?: string };
-  ai: { status: string; subsystems?: Record<string, string> };
-  ocr: { status: string; error?: string };
-  iot: { status: string; message?: string };
+  backend: string;
+  database: string;
+  ai: string;
+  ocr: string;
+  cache: string;
+  iot: string;
+  failed?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -548,27 +551,62 @@ class ApiService {
   }
 
   async getSystemHealth(): Promise<SystemHealth> {
-    const [database, ai, ocr, iot] = await Promise.allSettled([
-      fetchWithTimeout(`${HOST}/api/health/database`, {}, 5_000)
-        .then((r) => r.json())
-        .catch(() => ({ status: "error" })),
-      fetchWithTimeout(`${HOST}/api/health/ai`, {}, 5_000)
-        .then((r) => r.json())
-        .catch(() => ({ status: "error" })),
-      fetchWithTimeout(`${HOST}/api/health/ocr`, {}, 5_000)
-        .then((r) => r.json())
-        .catch(() => ({ status: "error" })),
-      fetchWithTimeout(`${HOST}/api/health/iot`, {}, 5_000)
-        .then((r) => r.json())
-        .catch(() => ({ status: "offline" })),
-    ]);
-
-    return {
-      database: database.status === "fulfilled" ? database.value : { status: "error" },
-      ai: ai.status === "fulfilled" ? ai.value : { status: "error" },
-      ocr: ocr.status === "fulfilled" ? ocr.value : { status: "error" },
-      iot: iot.status === "fulfilled" ? iot.value : { status: "offline" },
-    };
+    try {
+      const response = await fetchWithTimeout(`${HOST}/api/system/status`, {}, 5_000);
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          logger.warn("ApiService", "System status check returned 404 - treating as degraded");
+          return {
+            backend: "degraded",
+            database: "degraded",
+            ai: "degraded",
+            ocr: "degraded",
+            cache: "degraded",
+            iot: "degraded",
+          };
+        }
+        
+        if (response.status === 500) {
+          logger.error("ApiService", "System status check returned 500");
+        } else {
+          logger.warn("ApiService", `System status check returned ${response.status}`);
+        }
+        
+        return {
+          backend: "offline",
+          database: "offline",
+          ai: "offline",
+          ocr: "offline",
+          cache: "offline",
+          iot: "offline",
+          failed: true,
+        };
+      }
+      
+      const result = await response.json();
+      return result as SystemHealth;
+    } catch (err: any) {
+      // Only use Logger.error() for 500 server errors, database failures, and unexpected exceptions
+      const is500 = err?.message?.includes("500") || err?.status === 500;
+      const isDbFailure = err?.message?.includes("database") || err?.message?.toLowerCase().includes("db");
+      
+      if (is500 || isDbFailure) {
+        logger.error("ApiService", "System status fetch failed (critical/db)", { error: err });
+      } else {
+        logger.warn("ApiService", "System status fetch failed (expected polling failure)", { error: err });
+      }
+      
+      return {
+        backend: "offline",
+        database: "offline",
+        ai: "offline",
+        ocr: "offline",
+        cache: "offline",
+        iot: "offline",
+        failed: true,
+      };
+    }
   }
 }
 

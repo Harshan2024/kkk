@@ -248,8 +248,8 @@ export function AIStoreProvider({
     async (text: string, activeRegion = "Global") => {
       if (!text.trim()) return;
 
-      if (error === "Database temporarily unavailable. Read-only mode active." || (systemHealth && (systemHealth.database?.status === "read-only" || systemHealth.database?.connected === false))) {
-        setToastError("Database temporarily unavailable. Read-only mode active.");
+      if (error?.includes("Database temporarily unavailable") || (systemHealth && (systemHealth.database === "offline" || systemHealth.database === "degraded"))) {
+        setToastError("Database temporarily unavailable. Running in read-only mode.");
         return;
       }
 
@@ -439,9 +439,9 @@ export function AIStoreProvider({
 
   const uploadReceipt = useCallback(
     async (file: File, activeRegion = "Global") => {
-      if (error === "Database temporarily unavailable. Read-only mode active." || (systemHealth && (systemHealth.database?.status === "read-only" || systemHealth.database?.connected === false))) {
-        setToastError("Database temporarily unavailable. Read-only mode active.");
-        throw new Error("Database temporarily unavailable. Read-only mode active.");
+      if (error?.includes("Database temporarily unavailable") || (systemHealth && (systemHealth.database === "offline" || systemHealth.database === "degraded"))) {
+        setToastError("Database temporarily unavailable. Running in read-only mode.");
+        throw new Error("Database temporarily unavailable. Running in read-only mode.");
       }
       try {
         const res = await api.uploadMultimodal(file, username, activeRegion);
@@ -462,8 +462,8 @@ export function AIStoreProvider({
 
   const submitCorrection = useCallback(
     async (original: string, corrected: string, category = "nlp_parse") => {
-      if (error === "Database temporarily unavailable. Read-only mode active." || (systemHealth && (systemHealth.database?.status === "read-only" || systemHealth.database?.connected === false))) {
-        setToastError("Database temporarily unavailable. Read-only mode active.");
+      if (error?.includes("Database temporarily unavailable") || (systemHealth && (systemHealth.database === "offline" || systemHealth.database === "degraded"))) {
+        setToastError("Database temporarily unavailable. Running in read-only mode.");
         return;
       }
       try {
@@ -484,13 +484,13 @@ export function AIStoreProvider({
     try {
       const health = await api.getSystemHealth();
       setSystemHealth(health);
-      if (health?.database?.status === "read-only" || health?.database?.status === "offline" || health?.database?.connected === false) {
-        setError("Database temporarily unavailable. Read-only mode active.");
+      if (health && !health.failed && (health.database === "offline" || health.database === "degraded")) {
+        setError("Database temporarily unavailable. Running in read-only mode.");
       } else {
-        setError((prev) => prev === "Database temporarily unavailable. Read-only mode active." ? null : prev);
+        setError((prev) => prev?.includes("Database temporarily unavailable") ? null : prev);
       }
     } catch (err) {
-      logger.error("aiStore", "fetchSystemHealth failed", err);
+      logger.warn("aiStore", "fetchSystemHealth failed", err);
     }
   }, []);
 
@@ -505,7 +505,12 @@ export function AIStoreProvider({
     fetchForecast();
     fetchSystemHealth();
 
+    const interval = setInterval(() => {
+      fetchSystemHealth();
+    }, 30000);
+
     return () => {
+      clearInterval(interval);
       if (abortRef.current) abortRef.current.abort();
     };
   }, [loadDashboardData, fetchChatHistory, fetchMetrics, fetchForecast, fetchSystemHealth]);
