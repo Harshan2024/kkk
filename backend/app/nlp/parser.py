@@ -56,6 +56,7 @@ KEYWORD_MAPPINGS = {
     "salad": ("food", "vegetables", "plate"),
     "fish": ("food", "fish", "kg"),
     "cheese": ("food", "cheese", "kg"),
+    "paneer dosa": ("food", "dosa", "item"),
     "paneer": ("food", "paneer", "kg"),
     "dosa": ("food", "dosa", "item"),
     "idli": ("food", "idli", "item"),
@@ -80,11 +81,23 @@ KEYWORD_MAPPINGS = {
     "flight": ("transport", "flight", "km"),
     "plane": ("transport", "flight", "km"),
     "flew": ("transport", "flight", "km"),
-    "walked": ("transport", "walking", "km"),
-    "walking": ("transport", "walking", "km"),
-    "cycle": ("transport", "cycling", "km"),
-    "cycling": ("transport", "cycling", "km"),
-    "bicycle": ("transport", "cycling", "km"),
+    "walked": ("exercise", "walking", "km"),
+    "walking": ("exercise", "walking", "km"),
+    "cycle": ("exercise", "cycling", "km"),
+    "cycling": ("exercise", "cycling", "km"),
+    "bicycle": ("exercise", "cycling", "km"),
+    "run": ("exercise", "running", "km"),
+    "ran": ("exercise", "running", "km"),
+    "running": ("exercise", "running", "km"),
+    "jog": ("exercise", "jogging", "km"),
+    "jogged": ("exercise", "jogging", "km"),
+    "jogging": ("exercise", "jogging", "km"),
+    "swim": ("exercise", "swimming", "km"),
+    "swimming": ("exercise", "swimming", "km"),
+    "workout": ("exercise", "exercise", "item"),
+    "exercise": ("exercise", "exercise", "item"),
+    "air_conditioner": ("appliances", "ac", "hours"),
+    "vegetarian_food": ("food", "vegetables", "kg"),
     
     # --- Appliances ---
     "ac": ("appliances", "ac", "hours"),
@@ -143,6 +156,8 @@ def preprocess_text(text: str) -> str:
     """
     Cleans up input string for parsing.
     """
+    from app.nlp.parser_synonyms import map_synonyms
+    text = map_synonyms(text)
     text = text.lower().strip()
     text = re.sub(r'\b(kms|kilometres|kilometer|kilometers)\b', 'km', text)
     text = re.sub(r'\b(miles|mile)\b', 'mile', text)
@@ -165,8 +180,8 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
     cleaned = preprocess_text(text)
     
     # Initial defaults
-    category = "lifestyle"
-    item = "general activity"
+    category = None
+    item = None
     quantity = 1.0
     unit = "item"
     confidence = 0.40
@@ -194,18 +209,213 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
                     parsed_unit = "times"
                 break
                 
-    # 2. Extract Category and Item using keyword mappings
-    matched_keyword = None
-    for kw, (cat, canonical_item, def_unit) in KEYWORD_MAPPINGS.items():
+    if parsed_quantity is not None:
+        quantity = parsed_quantity
+    if parsed_unit is not None:
+        unit = parsed_unit
+
+    # Standardize units
+    if unit in ["miles", "mile", "mi"]:
+        unit = "miles"
+    elif unit in ["plates", "plate"]:
+        unit = "plate"
+    elif unit in ["bowls", "bowl"]:
+        unit = "bowl"
+    elif unit in ["cups", "cup"]:
+        unit = "cup"
+    elif unit in ["servings", "serving"]:
+        unit = "serving"
+    elif unit in ["hours", "hour", "hrs", "hr"]:
+        unit = "hours"
+    elif unit in ["g", "grams", "gram"]:
+        unit = "g"
+    elif unit in ["kg", "kilograms", "kilogram"]:
+        unit = "kg"
+    elif unit in ["l", "liter", "liters", "litre", "litres"]:
+        unit = "L"
+
+    # 2. Extract Category and Item using intent priority routing
+    #
+    # Priority 1: Exercise Activities
+    # ----------------------------------------------------
+    exercise_keywords = [
+        "running", "walking", "jogging", "cycling", "swimming", "workout", "exercise", "swim", "run", "ran", "walk", "walked", "cycle", "cycled", "bicycle"
+    ]
+    is_exercise = False
+    matched_ex_kw = None
+    for kw in exercise_keywords:
         if re.search(r'\b' + re.escape(kw) + r'\b', cleaned):
-            category = cat
-            item = canonical_item
-            unit = def_unit
-            matched_keyword = kw
+            is_exercise = True
+            matched_ex_kw = kw
             break
             
-    # If no direct keyword matched, try semantic matching (Vector search model mock)
-    if not matched_keyword:
+    if is_exercise:
+        category = "exercise"
+        confidence = 1.0
+        ambiguity = 0.0
+        
+        # Map to canonical exercise item
+        if matched_ex_kw in ["run", "ran", "running"]:
+            item = "running"
+        elif matched_ex_kw in ["walk", "walked", "walking"]:
+            item = "walking"
+        elif matched_ex_kw in ["jog", "jogging"]:
+            item = "jogging"
+        elif matched_ex_kw in ["cycle", "cycled", "cycling", "bicycle"]:
+            item = "cycling"
+        elif matched_ex_kw in ["swim", "swimming"]:
+            item = "swimming"
+        else:
+            item = "exercise"
+            
+        # Default to km if no distance unit found
+        if unit not in ["km", "miles"]:
+            unit = "km"
+
+    # Priority 2: Transport Activities
+    # ----------------------------------------------------
+    transport_keywords = [
+        "car", "motorcycle", "bike", "bus", "train", "flight", "auto", "taxi",
+        "cab", "truck", "van", "drove", "rode", "travelled by", "commuted by",
+        "petrol car", "diesel car", "electric car", "travelled"
+    ]
+    matched_keyword = None
+    if not category:
+        is_transport = False
+        for kw in transport_keywords:
+            if re.search(r'\b' + re.escape(kw) + r'\b', cleaned):
+                is_transport = True
+                break
+                
+        if is_transport:
+            for kw, (cat, canonical_item, def_unit) in KEYWORD_MAPPINGS.items():
+                if cat == "transport" and re.search(r'\b' + re.escape(kw) + r'\b', cleaned):
+                    category = "transport"
+                    item = canonical_item
+                    unit = def_unit if parsed_unit is None else unit
+                    matched_keyword = kw
+                    confidence = 0.95
+                    ambiguity = 0.05
+                    break
+            
+            # Constraints: if no direct keyword matched, try semantic but only if category is transport
+            if not matched_keyword:
+                try:
+                    from app.ai.semantic.semantic import find_semantic_match, get_semantic_confidence
+                    from app.utils.circuit_breaker import breakers
+                    sem_match = breakers["embeddings"].call(find_semantic_match, cleaned)
+                    if sem_match:
+                        matched_keyword, similarity = sem_match
+                        cat, canonical_item, def_unit = KEYWORD_MAPPINGS[matched_keyword]
+                        if cat == "transport":
+                            category = "transport"
+                            item = canonical_item
+                            unit = def_unit if parsed_unit is None else unit
+                            confidence, ambiguity = get_semantic_confidence(cleaned, matched_keyword, similarity)
+                except Exception:
+                    pass
+            
+            # Default fallback for transport if no mapping found but transport words present
+            if not category:
+                category = "transport"
+                item = "petrol car"
+                unit = "km"
+                confidence = 0.70
+                ambiguity = 0.30
+
+    # Priority 3: Food Activities
+    # ----------------------------------------------------
+    # Pass A: Use the structured food knowledge base (longest-phrase-first).
+    # This correctly identifies full dish names like "Chicken Biriyani" before
+    # falling back to bare ingredient words like "chicken" or "rice".
+    if not category:
+        from app.nlp.food_emission_factors import lookup_food, get_ingredient_fallback
+        food_hit = lookup_food(cleaned)
+        if food_hit is None:
+            # Rule 4: ingredient fallback (e.g. "Chicken Pasta" → Chicken category)
+            food_hit = get_ingredient_fallback(cleaned)
+        if food_hit:
+            category = "food"
+            item = food_hit["name"]
+            unit = food_hit["unit"] if parsed_unit is None else unit
+            # Store co2_kg for the engine to use directly
+            _food_co2_kg = food_hit["co2_kg"]
+            confidence = 0.97
+            ambiguity = 0.03
+        else:
+            _food_co2_kg = None
+
+    # Pass B: Legacy KEYWORD_MAPPINGS fallback for any remaining food keywords
+    # not covered by the new database (e.g. generic "rice", "milk", "bread").
+    if not category:
+        _food_co2_kg = None
+        for kw, (cat, canonical_item, def_unit) in KEYWORD_MAPPINGS.items():
+            if cat == "food" and re.search(r'\b' + re.escape(kw) + r'\b', cleaned):
+                category = "food"
+                item = canonical_item
+                unit = def_unit if parsed_unit is None else unit
+                matched_keyword = kw
+                confidence = 0.95
+                ambiguity = 0.05
+                break
+    else:
+        if category == "food" and "_food_co2_kg" not in dir():
+            _food_co2_kg = None
+
+    # Priority 4: Energy/Appliance Activities
+    # ----------------------------------------------------
+    if not category:
+        for kw, (cat, canonical_item, def_unit) in KEYWORD_MAPPINGS.items():
+            if cat == "appliances" and re.search(r'\b' + re.escape(kw) + r'\b', cleaned):
+                category = "appliances"
+                item = canonical_item
+                unit = def_unit if parsed_unit is None else unit
+                matched_keyword = kw
+                confidence = 0.95
+                ambiguity = 0.05
+                break
+
+    # Priority 5: Shopping Activities
+    # ----------------------------------------------------
+    if not category:
+        for kw, (cat, canonical_item, def_unit) in KEYWORD_MAPPINGS.items():
+            if cat == "shopping" and re.search(r'\b' + re.escape(kw) + r'\b', cleaned):
+                category = "shopping"
+                item = canonical_item
+                unit = def_unit if parsed_unit is None else unit
+                matched_keyword = kw
+                confidence = 0.95
+                ambiguity = 0.05
+                break
+
+    # Priority 6: Waste Activities
+    # ----------------------------------------------------
+    if not category:
+        for kw, (cat, canonical_item, def_unit) in KEYWORD_MAPPINGS.items():
+            if cat == "waste" and re.search(r'\b' + re.escape(kw) + r'\b', cleaned):
+                category = "waste"
+                item = canonical_item
+                unit = def_unit if parsed_unit is None else unit
+                matched_keyword = kw
+                confidence = 0.95
+                ambiguity = 0.05
+                break
+
+    # Priority 7: Water Activities
+    # ----------------------------------------------------
+    if not category:
+        for kw, (cat, canonical_item, def_unit) in KEYWORD_MAPPINGS.items():
+            if cat == "water" and re.search(r'\b' + re.escape(kw) + r'\b', cleaned):
+                category = "water"
+                item = canonical_item
+                unit = def_unit if parsed_unit is None else unit
+                matched_keyword = kw
+                confidence = 0.95
+                ambiguity = 0.05
+                break
+
+    # Fallback: Semantic matching across non-transport categories
+    if not category:
         try:
             from app.ai.semantic.semantic import find_semantic_match, get_semantic_confidence
             from app.utils.circuit_breaker import breakers
@@ -213,47 +423,19 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
             if sem_match:
                 matched_keyword, similarity = sem_match
                 cat, canonical_item, def_unit = KEYWORD_MAPPINGS[matched_keyword]
-                category = cat
-                item = canonical_item
-                unit = def_unit
-                confidence, ambiguity = get_semantic_confidence(cleaned, matched_keyword, similarity)
-        except Exception as e:
-            # Fallback if import or semantic match fails (including open circuit)
+                if cat != "transport":
+                    category = cat
+                    item = canonical_item
+                    unit = def_unit if parsed_unit is None else unit
+                    confidence, ambiguity = get_semantic_confidence(cleaned, matched_keyword, similarity)
+        except Exception:
             pass
 
-    # Apply parsed values if found
-    if parsed_quantity is not None:
-        quantity = parsed_quantity
-    if parsed_unit is not None:
-        unit = parsed_unit
-        if unit in ["miles", "mile", "mi"]:
-            unit = "miles"
-        elif unit in ["plates", "plate"]:
-            unit = "plate"
-        elif unit in ["bowls", "bowl"]:
-            unit = "bowl"
-        elif unit in ["cups", "cup"]:
-            unit = "cup"
-        elif unit in ["servings", "serving"]:
-            unit = "serving"
-        elif unit in ["hours", "hour", "hrs", "hr"]:
-            unit = "hours"
-        elif unit in ["g", "grams", "gram"]:
-            unit = "g"
-        elif unit in ["kg", "kilograms", "kilogram"]:
-            unit = "kg"
-        elif unit in ["l", "liter", "liters", "litre", "litres"]:
-            unit = "L"
-
-    # Calculate Confidence Score if direct matched
-    if matched_keyword and confidence == 0.40:
-        words = cleaned.split()
-        if matched_keyword in words:
-            confidence = 0.95
-        else:
-            confidence = 0.85
-        ambiguity = round(1.0 - confidence, 2)
-    elif not matched_keyword:
+    # Final fallback if still nothing matches
+    if not category:
+        category = "lifestyle"
+        item = "general activity"
+        unit = "item" if parsed_unit is None else unit
         confidence = 0.30
         ambiguity = 0.70
         
@@ -276,6 +458,8 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
                 suggestions_list.append(item_name)
         suggestions = suggestions_list[:3]
 
+    # Post-processing calculations for special cases
+    #
     # 3. Special Case: Flights / Air Travel Route Estimator
     if category == "transport" and item == "flight":
         flight_pattern = r'flight\s+(?:from\s+)?([a-zA-Z\s]+)\s+to\s+([a-zA-Z\s]+)'
@@ -333,16 +517,20 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
                 "label": ent.label_
             })
             
-    # Observability log confidence
     try:
         from app.ai.observability.observability import track_confidence
         track_confidence(confidence)
     except Exception:
         pass
-        
-    # Ensure category is always returned and handle low confidence fallback
-    if confidence < 0.60 or not category or not isinstance(category, str) or category.strip() == "":
-        category = "general"
+
+    # Step 8 low-confidence fallback to "Needs Clarification"
+    if confidence < 0.50:
+        category = "lifestyle"
+        item = "Needs Clarification"
+        quantity = 0.0
+        unit = "unit"
+        ambiguity = round(1.0 - confidence, 2)
+        suggestions = []
         
     return {
         "category": category,
@@ -353,7 +541,9 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
         "ambiguity": round(ambiguity, 2),
         "suggestions": suggestions,
         "original_text": text,
-        "spacy_entities": spacy_entities
+        "spacy_entities": spacy_entities,
+        # Pre-calculated food CO₂ value from food_emission_factors.py (None for non-food)
+        "food_co2_kg": locals().get("_food_co2_kg", None),
     }
 
 def parse_compound_activity(text: str) -> List[Dict[str, Any]]:

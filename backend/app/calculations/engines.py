@@ -3,13 +3,32 @@ from sqlalchemy.orm import Session
 from app.models import EmissionFactor
 from app.emissions.factors import FOOD_UNIT_TO_KG, DEFAULT_EMISSION_FACTORS
 
+class CachedEmissionFactor:
+    def __init__(self, category: str, item_key: str, display_name: str, factor: float, unit: str, region: str, source: str):
+        self.category = category
+        self.item_key = item_key
+        self.display_name = display_name
+        self.factor = factor
+        self.unit = unit
+        self.region = region
+        self.source = source
+
+_FACTOR_CACHE = {}
+_ALL_FACTORS_CACHE = {}
+
 # Database error resilient query helpers
 def get_factor_first(db: Session, category: str = None, item_key: str = None, region: str = "Global") -> Any:
     """
     Queries an emission factor, matching region first.
     Falls back to 'Global' if region-specific entry does not exist.
     Falls back to local static config if the database connection fails.
+    Caches results in memory to avoid repeated DB roundtrips.
     """
+    cache_key = (category, item_key, region)
+    if cache_key in _FACTOR_CACHE:
+        return _FACTOR_CACHE[cache_key]
+        
+    record = None
     try:
         query = db.query(EmissionFactor)
         if category:
@@ -19,66 +38,103 @@ def get_factor_first(db: Session, category: str = None, item_key: str = None, re
             
         # 1. Try matching the requested region
         record = query.filter(EmissionFactor.region == region).first()
-        if record:
-            return record
+        if not record:
+            # 2. Fall back to Global region
+            record = query.filter(EmissionFactor.region == "Global").first()
+        if not record:
+            # 3. Last resort fallback to any first match
+            record = query.first()
             
-        # 2. Fall back to Global region
-        record = query.filter(EmissionFactor.region == "Global").first()
-        if record:
-            return record
-            
-        # 3. Last resort fallback to any first match
-        return query.first()
-        
     except Exception as e:
-        # Silently fall back to standard local factor configuration
-        for f in DEFAULT_EMISSION_FACTORS:
-            match = True
-            if category and f["category"] != category:
-                match = False
-            if item_key and f["item_key"] != item_key:
-                match = False
+        record = None
+
+    if record:
+        cached = CachedEmissionFactor(
+            category=record.category,
+            item_key=record.item_key,
+            display_name=record.display_name,
+            factor=record.factor,
+            unit=record.unit,
+            region=record.region,
+            source=record.source
+        )
+        _FACTOR_CACHE[cache_key] = cached
+        return cached
+
+    # Silently fall back to standard local factor configuration
+    for f in DEFAULT_EMISSION_FACTORS:
+        match = True
+        if category and f["category"] != category:
+            match = False
+        if item_key and f["item_key"] != item_key:
+            match = False
+            
+        # Prefer matching region if possible in offline fallback
+        if match:
+            f_region = f.get("region", "Global")
+            if f_region == region or f_region == "Global":
+                cached = CachedEmissionFactor(
+                    category=f["category"],
+                    item_key=f["item_key"],
+                    display_name=f["display_name"],
+                    factor=f["factor"],
+                    unit=f["unit"],
+                    region=f_region,
+                    source=f.get("source", "offline_fallback")
+                )
+                _FACTOR_CACHE[cache_key] = cached
+                return cached
                 
-            # Prefer matching region if possible in offline fallback
-            if match:
-                f_region = f.get("region", "Global")
-                if f_region == region or f_region == "Global":
-                    class MockRecord:
-                        def __init__(self, d):
-                            self.category = d["category"]
-                            self.item_key = d["item_key"]
-                            self.display_name = d["display_name"]
-                            self.factor = d["factor"]
-                            self.unit = d["unit"]
-                            self.region = d.get("region", "Global")
-                            self.source = d.get("source", "offline_fallback")
-                    return MockRecord(f)
-        return None
+    _FACTOR_CACHE[cache_key] = None
+    return None
 
 def get_factors_all(db: Session, category: str = None) -> list:
     """
     Queries all emission factors of a category, falling back to local static config if database fails.
+    Caches results in memory to avoid repeated DB roundtrips.
     """
+    if category in _ALL_FACTORS_CACHE:
+        return _ALL_FACTORS_CACHE[category]
+        
+    records = []
     try:
         query = db.query(EmissionFactor)
         if category:
             query = query.filter(EmissionFactor.category == category)
-        return query.all()
+        records = query.all()
     except Exception as e:
+        records = []
+        
+    if records:
         results = []
-        for f in DEFAULT_EMISSION_FACTORS:
-            if not category or f["category"] == category:
-                class MockRecord:
-                    def __init__(self, d):
-                        self.category = d["category"]
-                        self.item_key = d["item_key"]
-                        self.display_name = d["display_name"]
-                        self.factor = d["factor"]
-                        self.unit = d["unit"]
-                        self.region = d.get("region", "Global")
-                        self.source = d.get("source", "offline_fallback")
-                results.append(MockRecord(f))
+        for record in records:
+            results.append(CachedEmissionFactor(
+                category=record.category,
+                item_key=record.item_key,
+                display_name=record.display_name,
+                factor=record.factor,
+                unit=record.unit,
+                region=record.region,
+                source=record.source
+            ))
+        _ALL_FACTORS_CACHE[category] = results
         return results
+
+    # Fallback to local config
+    results = []
+    for f in DEFAULT_EMISSION_FACTORS:
+        if not category or f["category"] == category:
+            results.append(CachedEmissionFactor(
+                category=f["category"],
+                item_key=f["item_key"],
+                display_name=f["display_name"],
+                factor=f["factor"],
+                unit=f["unit"],
+                region=f.get("region", "Global"),
+                source=f.get("source", "offline_fallback")
+            ))
+    _ALL_FACTORS_CACHE[category] = results
+    return results
 
 # Ingredient-based recipes for composite dishes (in kg of ingredient per portion/plate)
 RECIPES = {
@@ -107,12 +163,28 @@ RECIPES = {
     }
 }
 
-def calculate_food_emission(db: Session, item: str, quantity: float, unit: str, region: str = "Global") -> Tuple[float, Dict[str, Any]]:
+def calculate_food_emission(db: Session, item: str, quantity: float, unit: str, region: str = "Global", food_co2_kg: float | None = None) -> Tuple[float, Dict[str, Any]]:
     """
     Calculates carbon emissions for food.
-    Composite dishes (e.g. curd rice) split into core weights.
+
+    Fast path: if `food_co2_kg` is provided (populated by the NLP food knowledge base),
+    the fixed per-serving value is used directly — no DB lookup needed.
+
+    Fallback: composite recipe ingredients + DB emission factors.
     Returns: (calculated_emissions_kg, metadata)
     """
+    # ── Fast path: pre-calculated value from food_emission_factors.py ────────
+    if food_co2_kg is not None:
+        total = food_co2_kg * max(quantity, 1.0)
+        return total, {
+            "calculation_type": "food_knowledge_base",
+            "dish": item,
+            "co2_per_serving_kg": food_co2_kg,
+            "servings": quantity,
+            "total_emissions_kg": round(total, 4),
+        }
+
+
     item_clean = item.lower().strip()
     unit_clean = unit.lower().strip()
     
@@ -322,6 +394,32 @@ def calculate_generic_emission(db: Session, category: str, item: str, quantity: 
     category_clean = category.lower().strip()
     item_clean = item.lower().strip()
     unit_clean = unit.lower().strip()
+    
+    if category_clean == "exercise":
+        metadata = {
+            "item_mapped": item_clean,
+            "quantity_input": quantity,
+            "unit_input": unit,
+            "quantity_calculated": quantity,
+            "unit_calculated": unit,
+            "emission_factor": 0.0,
+            "source": "Calculated",
+            "method": "Human Powered"
+        }
+        return 0.0, metadata
+
+    if item_clean == "needs clarification":
+        metadata = {
+            "item_mapped": "Needs Clarification",
+            "quantity_input": quantity,
+            "unit_input": unit,
+            "quantity_calculated": quantity,
+            "unit_calculated": unit,
+            "emission_factor": 0.0,
+            "source": "Calculated",
+            "method": "Needs Clarification"
+        }
+        return 0.0, metadata
     
     factor_record = get_factor_first(db, category=category_clean, item_key=item_clean, region=region)
     

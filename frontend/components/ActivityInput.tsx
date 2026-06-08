@@ -134,6 +134,7 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
       shopping: "text-purple-500 bg-purple-500/10 border-purple-500/20",
       waste: "text-rose-500 bg-rose-500/10 border-rose-500/20",
       water: "text-cyan-500 bg-cyan-500/10 border-cyan-500/20",
+      exercise: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
     };
     const safeCategory = getSafeCategory(category);
     return colors[safeCategory] || "text-emerald-500 bg-emerald-500/10 border-emerald-500/20";
@@ -345,6 +346,11 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
                     <div className="text-xl font-black text-white font-sans">
                       {parseResult.calculated_value.toFixed(1)} <span className="text-[10px] text-stone-500 uppercase">kg</span>
                     </div>
+                    {parseResult.parsed.category === "exercise" && (
+                      <span className="mt-1.5 inline-block px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-bold">
+                        🌱 Eco-Friendly Activity
+                      </span>
+                    )}
                   </div>
                   <button
                     onClick={handleSubmit}

@@ -437,6 +437,10 @@ class ApiService {
     return this.request<ObservabilityMetrics>(`/observability/metrics?username=${username}`);
   }
 
+  async getHabitAnalysis(username = "demo_user"): Promise<any> {
+    return this.request<any>(`/habit-analysis?username=${username}`);
+  }
+
   async correctActivity(
     original_text: string,
     corrected_text: string,

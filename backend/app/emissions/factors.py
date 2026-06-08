@@ -11,6 +11,7 @@ DEFAULT_CATEGORIES = [
     {"name": "waste", "display_name": "Waste Management", "icon": "Trash2"},
     {"name": "water", "display_name": "Water Usage", "icon": "Droplet"},
     {"name": "lifestyle", "display_name": "Lifestyle & Activities", "icon": "Activity"},
+    {"name": "exercise", "display_name": "Exercise & Fitness", "icon": "Dumbbell"},
 ]
 
 # Define standard emission factors with regional configurations
@@ -39,6 +40,14 @@ DEFAULT_EMISSION_FACTORS = [
     {"category": "transport", "item_key": "flight", "display_name": "Flight (Air Travel)", "factor": 0.255, "unit": "km", "source": "IPCC", "region": "Global", "confidence": 0.95},
     {"category": "transport", "item_key": "walking", "display_name": "Walking", "factor": 0.0, "unit": "km", "source": "Calculated", "region": "Global", "confidence": 0.99},
     {"category": "transport", "item_key": "cycling", "display_name": "Cycling", "factor": 0.0, "unit": "km", "source": "Calculated", "region": "Global", "confidence": 0.99},
+    
+    # --- EXERCISE (0.0 kgCO2e per km/item) ---
+    {"category": "exercise", "item_key": "running", "display_name": "Running", "factor": 0.0, "unit": "km", "source": "Calculated", "region": "Global", "confidence": 1.0},
+    {"category": "exercise", "item_key": "walking", "display_name": "Walking", "factor": 0.0, "unit": "km", "source": "Calculated", "region": "Global", "confidence": 1.0},
+    {"category": "exercise", "item_key": "jogging", "display_name": "Jogging", "factor": 0.0, "unit": "km", "source": "Calculated", "region": "Global", "confidence": 1.0},
+    {"category": "exercise", "item_key": "cycling", "display_name": "Cycling", "factor": 0.0, "unit": "km", "source": "Calculated", "region": "Global", "confidence": 1.0},
+    {"category": "exercise", "item_key": "swimming", "display_name": "Swimming", "factor": 0.0, "unit": "km", "source": "Calculated", "region": "Global", "confidence": 1.0},
+    {"category": "exercise", "item_key": "exercise", "display_name": "Workout / Exercise", "factor": 0.0, "unit": "item", "source": "Calculated", "region": "Global", "confidence": 1.0},
     
     # --- REGIONAL GRID ELECTRICITY (kgCO2e per kWh) ---
     {"category": "electricity", "item_key": "grid electricity", "display_name": "Grid Electricity (Global)", "factor": 0.70, "unit": "kWh", "source": "IEA", "region": "Global", "confidence": 0.90},

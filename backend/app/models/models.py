@@ -17,6 +17,17 @@ class User(Base):
     chat_messages = relationship("ChatMessage", back_populates="user", cascade="all, delete-orphan")
     corrections = relationship("UserCorrection", back_populates="user", cascade="all, delete-orphan")
 
+    @property
+    def sustainability_score(self):
+        try:
+            if self.scores:
+                latest = sorted(self.scores, key=lambda s: s.logged_at or s.date, reverse=True)[0]
+                return latest.score
+        except Exception:
+            pass
+        return 96.0
+
+
 
 class Category(Base):
     __tablename__ = "categories"

@@ -71,7 +71,7 @@ def sanitize_float(val: any, default: float = 0.0) -> float:
         return default
 
 def sanitize_category(cat: any) -> str:
-    valid_categories = {"food", "transport", "electricity", "appliances", "shopping", "waste", "water", "lifestyle"}
+    valid_categories = {"food", "transport", "electricity", "appliances", "shopping", "waste", "water", "lifestyle", "exercise"}
     if not cat:
         return "lifestyle"
     cat_str = str(cat).strip().lower()
@@ -1314,3 +1314,37 @@ def get_system_health(db: Session = Depends(get_db)):
         },
         "error": None
     }
+
+
+# GET /habit-analysis
+@router.get("/habit-analysis")
+def get_habit_analysis(
+    username: str = "demo_user",
+    db: Session = Depends(get_db)
+):
+    """
+    Exposes a lightweight habit analysis calculation endpoint.
+    """
+    try:
+        user = get_or_create_user(db, username)
+        from app.services.habit_analysis_service import perform_habit_analysis
+        result = perform_habit_analysis(db, user.id)
+        return {
+            "success": True,
+            "data": result,
+            "error": None
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch habit analysis: {str(e)}")
+        return {
+            "success": False,
+            "data": {
+                "insufficient_data": True,
+                "insights": [],
+                "details": {}
+            },
+            "error": str(e)
+        }
+
+
+

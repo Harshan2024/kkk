@@ -23,6 +23,10 @@ const CopilotChat = dynamic(() => import("../components/CopilotChat"), {
   loading: () => null,
   ssr: false,
 });
+const HabitInsights = dynamic(() => import("../components/HabitInsights").then(mod => mod.HabitInsights), {
+  loading: () => <div className="glass-card rounded-3xl h-[360px] animate-pulse bg-white/5" />,
+  ssr: false,
+});
 import MultimodalUpload from "../components/MultimodalUpload";
 import SystemStatusWidget from "../components/SystemStatusWidget";
 import ErrorBoundary from "../components/ErrorBoundary";
@@ -338,10 +342,10 @@ function HomeContent() {
                 </div>
               </motion.div>
 
-              {/* Bottom Row: Quests + Donut + AI Insights — each isolated */}
+              {/* Bottom Row: Quests + Donut + AI Insights + Habit Insights — each isolated */}
               <motion.div
                 variants={itemVariants}
-                className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5"
+                className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5"
               >
                 <ErrorBoundary>
                   <DailyQuests />
@@ -351,6 +355,9 @@ function HomeContent() {
                 </ErrorBoundary>
                 <ErrorBoundary>
                   <AIRecommendations insights={insights} loading={loading} />
+                </ErrorBoundary>
+                <ErrorBoundary>
+                  <HabitInsights />
                 </ErrorBoundary>
               </motion.div>
 
