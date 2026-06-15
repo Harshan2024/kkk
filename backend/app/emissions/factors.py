@@ -41,6 +41,17 @@ DEFAULT_EMISSION_FACTORS = [
     {"category": "transport", "item_key": "walking", "display_name": "Walking", "factor": 0.0, "unit": "km", "source": "Calculated", "region": "Global", "confidence": 0.99},
     {"category": "transport", "item_key": "cycling", "display_name": "Cycling", "factor": 0.0, "unit": "km", "source": "Calculated", "region": "Global", "confidence": 0.99},
     
+    # --- Normalized spaCy Transport Factors ---
+    {"category": "transport", "item_key": "electric_train", "display_name": "Electric Train", "factor": 0.020, "unit": "km", "source": "DEFRA", "region": "Global", "confidence": 0.92},
+    {"category": "transport", "item_key": "electric_bus", "display_name": "Electric Bus", "factor": 0.060, "unit": "km", "source": "DEFRA", "region": "Global", "confidence": 0.89},
+    {"category": "transport", "item_key": "electric_scooter", "display_name": "Electric Scooter", "factor": 0.015, "unit": "km", "source": "DEFRA", "region": "Global", "confidence": 0.91},
+    {"category": "transport", "item_key": "electric_bike", "display_name": "Electric Bike", "factor": 0.020, "unit": "km", "source": "DEFRA", "region": "Global", "confidence": 0.91},
+    {"category": "transport", "item_key": "petrol_car", "display_name": "Petrol Car (Normalized)", "factor": 0.192, "unit": "km", "source": "DEFRA", "region": "Global", "confidence": 0.95},
+    {"category": "transport", "item_key": "diesel_car", "display_name": "Diesel Car (Normalized)", "factor": 0.171, "unit": "km", "source": "DEFRA", "region": "Global", "confidence": 0.94},
+    {"category": "transport", "item_key": "hybrid_car", "display_name": "Hybrid Car", "factor": 0.095, "unit": "km", "source": "DEFRA", "region": "Global", "confidence": 0.93},
+    {"category": "transport", "item_key": "cng_car", "display_name": "CNG Car", "factor": 0.110, "unit": "km", "source": "DEFRA", "region": "Global", "confidence": 0.92},
+    {"category": "transport", "item_key": "auto_rickshaw", "display_name": "Auto Rickshaw", "factor": 0.090, "unit": "km", "source": "DEFRA", "region": "Global", "confidence": 0.91},
+    
     # --- EXERCISE (0.0 kgCO2e per km/item) ---
     {"category": "exercise", "item_key": "running", "display_name": "Running", "factor": 0.0, "unit": "km", "source": "Calculated", "region": "Global", "confidence": 1.0},
     {"category": "exercise", "item_key": "walking", "display_name": "Walking", "factor": 0.0, "unit": "km", "source": "Calculated", "region": "Global", "confidence": 1.0},

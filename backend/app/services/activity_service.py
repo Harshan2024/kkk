@@ -83,11 +83,10 @@ def serialize_user(user):
     user_id = getattr(user, "id", 0)
     username = getattr(user, "username", "guest")
 
+    # To avoid lazy-loading all scores and causing unnecessary DB round-trips,
+    # we default the score to 96.0 here. If the caller actually needs
+    # the latest score, they should query it explicitly.
     score_val = 96.0
-    try:
-        score_val = getattr(user, "sustainability_score", 96.0)
-    except Exception:
-        pass
 
     return UserDict({
         "id": user_id,
@@ -143,28 +142,57 @@ def get_or_create_user(db: Session, username: str = "demo_user") -> UserDict:
 def calculate_emissions(db: Session, parsed: dict, region: str = "Global") -> tuple[float, dict]:
     """
     Directs parsed activity data to correct calculation engine.
+
+    Fast paths (in priority order):
+    1. pre_computed_emission  — city-route transport or wattage-based energy
+    2. shopping_co2_kg        — intent-router lifecycle CO₂ for bought items
+    3. food_co2_kg            — food knowledge base flat value
+    4. Normal engine dispatch — transport / appliances / generic
+
     Returns (0.0, {}) on any calculation failure — never raises.
     """
     try:
         category = parsed.get("category") or "general"
-        item = parsed.get("item") or "unknown"
+        item     = parsed.get("item") or "unknown"
         quantity = parsed.get("quantity") if parsed.get("quantity") is not None else 1.0
-        unit = parsed.get("unit") or "unit"
+        unit     = parsed.get("unit") or "unit"
 
+        # ── Fast path 1: pre-computed (wattage / city-route) ──────────────
+        pre = parsed.get("pre_computed_emission")
+        if pre and "total_emissions_kg" in pre:
+            return pre["total_emissions_kg"], pre
+
+        # ── Fast path 2: shopping intent CO₂ (lifecycle, per item) ────────
+        shopping_co2 = parsed.get("shopping_co2_kg")
+        if shopping_co2 is not None and category == "shopping":
+            total = shopping_co2 * max(quantity, 1.0)
+            return total, {
+                "calculation_type": "shopping_lifecycle",
+                "item": item,
+                "co2_per_item_kg": shopping_co2,
+                "quantity": quantity,
+                "total_emissions_kg": round(total, 4),
+            }
+
+        # ── Fast path 3: food knowledge base flat value ────────────────────
         if category == "food":
             food_co2_kg = parsed.get("food_co2_kg")
             return calculate_food_emission(db, item, quantity, unit, region=region, food_co2_kg=food_co2_kg)
-        elif category == "transport":
+
+        # ── Normal dispatch ────────────────────────────────────────────────
+        if category == "transport":
             return calculate_transport_emission(db, item, quantity, unit, region=region)
         elif category in ("appliances", "electricity"):
             duration = quantity if unit == "hours" else 1.0
-            qty = 1.0 if unit == "hours" else quantity
+            qty      = 1.0 if unit == "hours" else quantity
             return calculate_appliance_emission(db, item, duration, qty, region=region)
         else:
             return calculate_generic_emission(db, category, item, quantity, unit, region=region)
+
     except Exception as e:
         log_structured("ERROR", "activity_service", f"calculate_emissions failed for category='{parsed.get('category')}' item='{parsed.get('item')}': {e}", {"parsed": parsed}, e)
         return 0.0, {"error": str(e), "fallback": True}
+
 
 
 def log_activity(db: Session, username: str, text: str, region: str = "Global") -> Activity:

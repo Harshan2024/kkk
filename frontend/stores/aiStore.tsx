@@ -43,8 +43,11 @@ interface AIContextProps {
   // Dashboard state
   summary: DashboardSummary | null;
   insights: AIInsight[];
+  insightsLoading: boolean;
   achievements: Achievement[];
+  achievementsLoading: boolean;
   activities: Activity[];
+  activitiesLoading: boolean;
   region: string;
   loading: boolean;
   error: string | null;
@@ -61,6 +64,7 @@ interface AIContextProps {
   chatLoading: boolean;
   forecastData: ForecastData[];
   forecastLoading: boolean;
+  forecastStatus: string | null;
   metrics: ObservabilityMetrics | null;
   metricsLoading: boolean;
   isRecording: boolean;
@@ -69,7 +73,7 @@ interface AIContextProps {
   setIsRecording: (recording: boolean) => void;
   fetchChatHistory: () => Promise<void>;
   sendChatMessage: (message: string) => Promise<string>;
-  fetchForecast: (model?: string, steps?: number) => Promise<void>;
+  fetchForecast: (model?: string, steps?: number, generate?: boolean) => Promise<void>;
   fetchMetrics: () => Promise<void>;
   uploadReceipt: (file: File, region?: string) => Promise<unknown>;
   submitCorrection: (original: string, corrected: string, category?: string) => Promise<void>;
@@ -103,8 +107,11 @@ export function AIStoreProvider({
   // Core dashboard state
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [insights, setInsights] = useState<AIInsight[]>([]);
+  const [insightsLoading, setInsightsLoading] = useState(false);
   const [achievements, setAchievements] = useState<Achievement[]>([]);
+  const [achievementsLoading, setAchievementsLoading] = useState(false);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(false);
   const [region, setRegion] = useState("Global");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -115,6 +122,7 @@ export function AIStoreProvider({
   const [chatLoading, setChatLoading] = useState(false);
   const [forecastData, setForecastData] = useState<ForecastData[]>([]);
   const [forecastLoading, setForecastLoading] = useState(false);
+  const [forecastStatus, setForecastStatus] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<ObservabilityMetrics | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -123,6 +131,17 @@ export function AIStoreProvider({
 
   // Unmount abort controller
   const abortRef = useRef<AbortController | null>(null);
+  const prevDbStatusRef = useRef<string | null>(null);
+
+  // Request deduplication refs
+  const isDashboardLoadingRef = useRef(false);
+  const isSystemHealthLoadingRef = useRef(false);
+  const isDeferredLoadingRef = useRef(false);
+  const isChatHistoryLoadingRef = useRef(false);
+
+  // Status syncing refs for polling loop
+  const systemHealthRef = useRef<SystemHealth | null>(null);
+  const errorRef = useRef<string | null>(null);
 
   const clearToastError = useCallback(() => setToastError(null), []);
 
@@ -132,7 +151,7 @@ export function AIStoreProvider({
 
   const fetchWithRetry = useCallback(async <T,>(
     fn: () => Promise<T>,
-    retries = 2,
+    retries = 1,
     delayMs = 800
   ): Promise<T | null> => {
     for (let i = 1; i <= retries; i++) {
@@ -154,64 +173,29 @@ export function AIStoreProvider({
   // ─────────────────────────────────────────────────────────────────────────
 
   const loadDashboardData = useCallback(async () => {
+    if (isDashboardLoadingRef.current) {
+      logger.info("aiStore", "loadDashboardData already in progress, skipping duplicate call");
+      return;
+    }
+    isDashboardLoadingRef.current = true;
     setLoading(true);
     setError(null);
 
-    // Run all four calls independently — partial success is valid
-    const [summaryResult, insightsResult, achievementsResult, historyResult] =
-      await Promise.allSettled([
-        fetchWithRetry(() => api.getDashboardSummary(username)),
-        fetchWithRetry(() => api.getInsights(username)),
-        fetchWithRetry(() => api.getAchievements(username)),
-        fetchWithRetry(() => api.getActivities(username)),
-      ]);
-
-    let anySuccess = false;
-
-    if (summaryResult.status === "fulfilled" && summaryResult.value) {
-      setSummary(summaryResult.value);
-      anySuccess = true;
-    } else {
-      logger.error("aiStore", "getDashboardSummary failed", summaryResult);
-    }
-
-    if (insightsResult.status === "fulfilled" && insightsResult.value) {
-      setInsights(insightsResult.value);
-      anySuccess = true;
-    } else {
-      logger.error("aiStore", "getInsights failed", insightsResult);
-      setInsights([]); // Safe empty state
-    }
-
-    if (achievementsResult.status === "fulfilled" && achievementsResult.value) {
-      setAchievements(achievementsResult.value);
-    } else {
-      setAchievements([]);
-    }
-
-    if (historyResult.status === "fulfilled" && historyResult.value) {
-      setActivities(historyResult.value);
-    } else {
-      setActivities([]);
-    }
-
-    if (!anySuccess) {
-      // All calls failed — show connection error
-      try {
-        const health = await api.checkHealth();
-        if (health?.database === "disconnected" || health?.database === "offline_safe_mode" || health?.database === "read-only") {
-          setError(
-            "Database temporarily unavailable. Read-only mode active."
-          );
-        } else {
-          setError("Unable to load dashboard data. Ensure the backend is running on port 8000.");
-        }
-      } catch {
-        setError("Cannot reach CarbonTracker API. Start the backend server and refresh.");
+    try {
+      const summaryResult = await fetchWithRetry(() => api.getDashboardSummary(username));
+      if (summaryResult) {
+        setSummary(summaryResult);
+      } else {
+        logger.error("aiStore", "getDashboardSummary failed");
+        setError("Unable to load dashboard summary.");
       }
+    } catch (err) {
+      logger.error("aiStore", "getDashboardSummary failed", err);
+      setError("Cannot reach CarbonTracker API. Start the backend server and refresh.");
+    } finally {
+      setLoading(false);
+      isDashboardLoadingRef.current = false;
     }
-
-    setLoading(false);
   }, [username, fetchWithRetry]);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -220,21 +204,14 @@ export function AIStoreProvider({
 
   const silentDashboardRefresh = useCallback(async () => {
     try {
-      const [summaryData, insightsData, achievementsData, historyData] = await Promise.allSettled([
-        api.getDashboardSummary(username),
-        api.getInsights(username),
-        api.getAchievements(username),
-        api.getActivities(username),
-      ]);
-
-      if (summaryData.status === "fulfilled" && summaryData.value)
-        setSummary(summaryData.value);
-      if (insightsData.status === "fulfilled" && insightsData.value)
-        setInsights(insightsData.value);
-      if (achievementsData.status === "fulfilled" && achievementsData.value)
-        setAchievements(achievementsData.value);
-      if (historyData.status === "fulfilled" && historyData.value)
-        setActivities(historyData.value);
+      const summaryData = await api.getDashboardSummary(username);
+      if (summaryData) {
+        setSummary(summaryData);
+      }
+      // Silently refresh the other deferred endpoints in background
+      api.getInsights(username).then((res) => setInsights(res ?? [])).catch(() => {});
+      api.getAchievements(username).then((res) => setAchievements(res ?? [])).catch(() => {});
+      api.getActivities(username).then((res) => setActivities(res ?? [])).catch(() => {});
     } catch (err) {
       logger.warn("aiStore", "Silent background refresh failed", err);
     }
@@ -248,7 +225,11 @@ export function AIStoreProvider({
     async (text: string, activeRegion = "Global") => {
       if (!text.trim()) return;
 
-      if (error?.includes("Database temporarily unavailable") || (systemHealth && (systemHealth.database === "offline" || systemHealth.database === "degraded"))) {
+      if (
+        error === "Reconnecting to database..." ||
+        error?.includes("Database temporarily unavailable") ||
+        (systemHealth && (systemHealth.database === "offline" || systemHealth.database === "degraded"))
+      ) {
         setToastError("Database temporarily unavailable. Running in read-only mode.");
         return;
       }
@@ -343,6 +324,11 @@ export function AIStoreProvider({
   // ─────────────────────────────────────────────────────────────────────────
 
   const fetchChatHistory = useCallback(async () => {
+    if (isChatHistoryLoadingRef.current) {
+      logger.info("aiStore", "fetchChatHistory already in progress, skipping duplicate call");
+      return;
+    }
+    isChatHistoryLoadingRef.current = true;
     setChatLoading(true);
     try {
       const history = await api.getChatHistory(username);
@@ -352,6 +338,7 @@ export function AIStoreProvider({
       setChatMessages([]);
     } finally {
       setChatLoading(false);
+      isChatHistoryLoadingRef.current = false;
     }
   }, [username]);
 
@@ -406,14 +393,16 @@ export function AIStoreProvider({
   // ─────────────────────────────────────────────────────────────────────────
 
   const fetchForecast = useCallback(
-    async (model = "prophet", steps = 30) => {
+    async (model = "prophet", steps = 30, generate = false) => {
       setForecastLoading(true);
       try {
-        const data = await api.getForecast(username, steps, model);
-        setForecastData(data ?? []);
+        const res = await api.getForecast(username, steps, model, generate);
+        setForecastData(res.data ?? []);
+        setForecastStatus(res.status ?? null);
       } catch (err) {
         logger.error("aiStore", "fetchForecast failed", err);
         setForecastData([]);
+        setForecastStatus(null);
       } finally {
         setForecastLoading(false);
       }
@@ -439,21 +428,24 @@ export function AIStoreProvider({
 
   const uploadReceipt = useCallback(
     async (file: File, activeRegion = "Global") => {
-      if (error?.includes("Database temporarily unavailable") || (systemHealth && (systemHealth.database === "offline" || systemHealth.database === "degraded"))) {
+      if (
+        error === "Reconnecting to database..." ||
+        error?.includes("Database temporarily unavailable") ||
+        (systemHealth && (systemHealth.database === "offline" || systemHealth.database === "degraded"))
+      ) {
         setToastError("Database temporarily unavailable. Running in read-only mode.");
         throw new Error("Database temporarily unavailable. Running in read-only mode.");
       }
       try {
         const res = await api.uploadMultimodal(file, username, activeRegion);
         silentDashboardRefresh();
-        fetchMetrics();
         return res;
       } catch (err) {
         logger.error("aiStore", "uploadReceipt failed", err);
         throw err;
       }
     },
-    [username, silentDashboardRefresh, fetchMetrics]
+    [username, silentDashboardRefresh]
   );
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -462,58 +454,153 @@ export function AIStoreProvider({
 
   const submitCorrection = useCallback(
     async (original: string, corrected: string, category = "nlp_parse") => {
-      if (error?.includes("Database temporarily unavailable") || (systemHealth && (systemHealth.database === "offline" || systemHealth.database === "degraded"))) {
+      if (
+        error === "Reconnecting to database..." ||
+        error?.includes("Database temporarily unavailable") ||
+        (systemHealth && (systemHealth.database === "offline" || systemHealth.database === "degraded"))
+      ) {
         setToastError("Database temporarily unavailable. Running in read-only mode.");
         return;
       }
       try {
         await api.correctActivity(original, corrected, category, username);
-        fetchMetrics();
       } catch (err) {
         logger.error("aiStore", "submitCorrection failed", err);
       }
     },
-    [username, fetchMetrics]
+    [username]
   );
 
   // ─────────────────────────────────────────────────────────────────────────
   // SYSTEM HEALTH
   // ─────────────────────────────────────────────────────────────────────────
 
+  const loadDeferredData = useCallback(async () => {
+    if (isDeferredLoadingRef.current) {
+      logger.info("aiStore", "loadDeferredData already in progress, skipping duplicate call");
+      return;
+    }
+    isDeferredLoadingRef.current = true;
+    setInsightsLoading(true);
+    setAchievementsLoading(true);
+    setActivitiesLoading(true);
+    setMetricsLoading(false);
+    setForecastLoading(false);
+    setChatLoading(true);
+
+    const insightsPromise = fetchWithRetry(() => api.getInsights(username))
+      .then((res) => setInsights(res ?? []))
+      .catch(() => setInsights([]))
+      .finally(() => setInsightsLoading(false));
+
+    const achievementsPromise = fetchWithRetry(() => api.getAchievements(username))
+      .then((res) => setAchievements(res ?? []))
+      .catch(() => setAchievements([]))
+      .finally(() => setAchievementsLoading(false));
+
+    const activitiesPromise = fetchWithRetry(() => api.getActivities(username))
+      .then((res) => setActivities(res ?? []))
+      .catch(() => setActivities([]))
+      .finally(() => setActivitiesLoading(false));
+
+    const chatPromise = fetchChatHistory();
+
+    await Promise.allSettled([insightsPromise, achievementsPromise, activitiesPromise, chatPromise]);
+    isDeferredLoadingRef.current = false;
+  }, [username, fetchWithRetry, fetchChatHistory]);
+
   const fetchSystemHealth = useCallback(async () => {
+    if (isSystemHealthLoadingRef.current) {
+      logger.info("aiStore", "fetchSystemHealth already in progress, skipping duplicate call");
+      return;
+    }
+    isSystemHealthLoadingRef.current = true;
     try {
       const health = await api.getSystemHealth();
       setSystemHealth(health);
-      if (health && !health.failed && (health.database === "offline" || health.database === "degraded")) {
-        setError("Database temporarily unavailable. Running in read-only mode.");
+      
+      const currentDbStatus = health?.database || "online";
+      const prevDbStatus = prevDbStatusRef.current;
+      prevDbStatusRef.current = currentDbStatus;
+
+      if (health && !health.failed && (currentDbStatus === "offline" || currentDbStatus === "degraded")) {
+        setError("Reconnecting to database...");
       } else {
-        setError((prev) => prev?.includes("Database temporarily unavailable") ? null : prev);
+        setError((prev) => prev === "Reconnecting to database..." || prev?.includes("Database temporarily unavailable") ? null : prev);
+        
+        // Auto-refresh: transition from offline/degraded back to online
+        if (
+          prevDbStatus &&
+          (prevDbStatus === "offline" || prevDbStatus === "degraded") &&
+          currentDbStatus === "online"
+        ) {
+          logger.info("aiStore", "Database recovered! Triggering automatic dashboard refresh.");
+          loadDashboardData();
+        }
       }
     } catch (err) {
       logger.warn("aiStore", "fetchSystemHealth failed", err);
+    } finally {
+      isSystemHealthLoadingRef.current = false;
     }
-  }, []);
+  }, [loadDashboardData]);
 
   // ─────────────────────────────────────────────────────────────────────────
-  // INITIAL LOAD + CLEANUP
+  // INITIAL LOAD + DEFERRED LOADING
   // ─────────────────────────────────────────────────────────────────────────
+
+  // Sync state values to refs to avoid polling loop recreation
+  useEffect(() => {
+    systemHealthRef.current = systemHealth;
+  }, [systemHealth]);
 
   useEffect(() => {
+    errorRef.current = error;
+  }, [error]);
+
+  // Critical startup load only — runs once on mount
+  useEffect(() => {
     loadDashboardData();
-    fetchChatHistory();
-    fetchMetrics();
-    fetchForecast();
     fetchSystemHealth();
 
-    const interval = setInterval(() => {
-      fetchSystemHealth();
-    }, 30000);
-
     return () => {
-      clearInterval(interval);
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [loadDashboardData, fetchChatHistory, fetchMetrics, fetchForecast, fetchSystemHealth]);
+  }, [loadDashboardData, fetchSystemHealth]);
+
+  // Controlled polling loop — runs once and schedules dynamically based on synced refs
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    const poll = () => {
+      const isReconnecting =
+        errorRef.current === "Reconnecting to database..." ||
+        (systemHealthRef.current &&
+          (systemHealthRef.current.database === "offline" ||
+            systemHealthRef.current.database === "degraded"));
+      const delay = isReconnecting ? 5000 : 30000;
+
+      timeoutId = setTimeout(async () => {
+        await fetchSystemHealth();
+        poll();
+      }, delay);
+    };
+
+    poll();
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [fetchSystemHealth]);
+
+  // Deferred loader triggers 50ms after summary is loaded
+  useEffect(() => {
+    if (!loading && summary) {
+      const timer = setTimeout(() => {
+        loadDeferredData();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, summary, loadDeferredData]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // CONTEXT VALUE
@@ -523,8 +610,11 @@ export function AIStoreProvider({
     () => ({
       summary,
       insights,
+      insightsLoading,
       achievements,
+      achievementsLoading,
       activities,
+      activitiesLoading,
       region,
       setRegion,
       loading,
@@ -538,6 +628,7 @@ export function AIStoreProvider({
       chatLoading,
       forecastData,
       forecastLoading,
+      forecastStatus,
       metrics,
       metricsLoading,
       isRecording,
@@ -554,9 +645,10 @@ export function AIStoreProvider({
       fetchSystemHealth,
     }),
     [
-      summary, insights, achievements, activities, region, loading, error,
+      summary, insights, insightsLoading, achievements, achievementsLoading,
+      activities, activitiesLoading, region, loading, error,
       toastError, clearToastError, setToastError, loadDashboardData, logActivity,
-      chatMessages, chatLoading, forecastData, forecastLoading, metrics,
+      chatMessages, chatLoading, forecastData, forecastLoading, forecastStatus, metrics,
       metricsLoading, isRecording, transcript, fetchChatHistory,
       sendChatMessage, fetchForecast, fetchMetrics, uploadReceipt,
       submitCorrection, systemHealth, fetchSystemHealth,

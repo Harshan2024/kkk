@@ -294,21 +294,45 @@ def calculate_transport_emission(db: Session, vehicle: str, distance: float, uni
     if not factor_record:
         if "car" in vehicle_clean:
             if "diesel" in vehicle_clean:
-                factor_record = get_factor_first(db, category="transport", item_key="diesel car", region=region)
+                factor_record = get_factor_first(db, category="transport", item_key="diesel_car", region=region)
+                if not factor_record:
+                    factor_record = get_factor_first(db, category="transport", item_key="diesel car", region=region)
             elif "ev" in vehicle_clean or "electric" in vehicle_clean:
-                factor_record = get_factor_first(db, category="transport", item_key="ev", region=region)
+                factor_record = get_factor_first(db, category="transport", item_key="electric_car", region=region)
+                if not factor_record:
+                    factor_record = get_factor_first(db, category="transport", item_key="ev", region=region)
+            elif "hybrid" in vehicle_clean:
+                factor_record = get_factor_first(db, category="transport", item_key="hybrid_car", region=region)
+            elif "cng" in vehicle_clean:
+                factor_record = get_factor_first(db, category="transport", item_key="cng_car", region=region)
             else:
-                factor_record = get_factor_first(db, category="transport", item_key="petrol car", region=region)
+                factor_record = get_factor_first(db, category="transport", item_key="petrol_car", region=region)
+                if not factor_record:
+                    factor_record = get_factor_first(db, category="transport", item_key="petrol car", region=region)
         elif "train" in vehicle_clean or "rail" in vehicle_clean:
-            factor_record = get_factor_first(db, category="transport", item_key="train", region=region)
+            if "electric" in vehicle_clean:
+                factor_record = get_factor_first(db, category="transport", item_key="electric_train", region=region)
+            if not factor_record:
+                factor_record = get_factor_first(db, category="transport", item_key="train", region=region)
         elif "metro" in vehicle_clean or "subway" in vehicle_clean or "tube" in vehicle_clean:
             factor_record = get_factor_first(db, category="transport", item_key="metro", region=region)
         elif "bus" in vehicle_clean:
-            factor_record = get_factor_first(db, category="transport", item_key="bus", region=region)
+            if "electric" in vehicle_clean:
+                factor_record = get_factor_first(db, category="transport", item_key="electric_bus", region=region)
+            if not factor_record:
+                factor_record = get_factor_first(db, category="transport", item_key="bus", region=region)
         elif "flight" in vehicle_clean or "plane" in vehicle_clean or "flying" in vehicle_clean:
             factor_record = get_factor_first(db, category="transport", item_key="flight", region=region)
         elif "bike" in vehicle_clean or "motorcycle" in vehicle_clean or "scooter" in vehicle_clean:
-            factor_record = get_factor_first(db, category="transport", item_key="bike", region=region)
+            if "electric" in vehicle_clean:
+                if "scooter" in vehicle_clean:
+                    factor_record = get_factor_first(db, category="transport", item_key="electric_scooter", region=region)
+                else:
+                    factor_record = get_factor_first(db, category="transport", item_key="electric_bike", region=region)
+            if not factor_record:
+                factor_record = get_factor_first(db, category="transport", item_key="bike", region=region)
+        elif "rickshaw" in vehicle_clean or "auto" in vehicle_clean:
+            factor_record = get_factor_first(db, category="transport", item_key="auto_rickshaw", region=region)
         elif "walk" in vehicle_clean or "cycle" in vehicle_clean or "bicycle" in vehicle_clean:
             factor_record = get_factor_first(db, category="transport", item_key="walking", region=region)
             
@@ -318,6 +342,18 @@ def calculate_transport_emission(db: Session, vehicle: str, distance: float, uni
     factor_val = factor_record.factor if factor_record else 0.192
     vehicle_mapped = factor_record.item_key if factor_record else "petrol car"
     
+    # Print debug logging output
+    print(f"Detected Entity:\n{vehicle}")
+    print(f"Normalized Entity:\n{vehicle_clean}")
+    print(f"Factor Key Used:\n{vehicle_mapped}")
+    print(f"Factor Key:\n{vehicle_mapped}")
+    print(f"Retrieved Factor:\n{factor_val:.3f}")
+    print(f"Factor Retrieved:\n{factor_val:.3f}")
+
+    import logging
+    logger = logging.getLogger("carbontracker.calculations")
+    logger.info(f"Detected Entity: {vehicle} | Normalized Entity: {vehicle_clean} | Factor Key: {vehicle_mapped} | Factor Retrieved: {factor_val}")
+
     emissions = distance_km * factor_val
     metadata = {
         "distance_km": round(distance_km, 2),

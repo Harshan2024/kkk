@@ -8,12 +8,14 @@ from app.calculations.engines import (
 
 # Mock classes for database test isolation
 class MockEmissionFactorRecord:
-    def __init__(self, category, item_key, factor, unit, source="test"):
+    def __init__(self, category, item_key, factor, unit, source="test", display_name=None, region="Global"):
         self.category = category
         self.item_key = item_key
         self.factor = factor
         self.unit = unit
         self.source = source
+        self.display_name = display_name or item_key.title()
+        self.region = region
 
 class MockDbSession:
     def __init__(self):
@@ -31,6 +33,15 @@ class MockDbSession:
             MockEmissionFactorRecord("transport", "metro", 0.029, "km"),
             MockEmissionFactorRecord("transport", "flight", 0.255, "km"),
             MockEmissionFactorRecord("transport", "walking", 0.0, "km"),
+            MockEmissionFactorRecord("transport", "electric_train", 0.020, "km"),
+            MockEmissionFactorRecord("transport", "electric_bus", 0.060, "km"),
+            MockEmissionFactorRecord("transport", "electric_scooter", 0.015, "km"),
+            MockEmissionFactorRecord("transport", "electric_bike", 0.020, "km"),
+            MockEmissionFactorRecord("transport", "petrol_car", 0.192, "km"),
+            MockEmissionFactorRecord("transport", "diesel_car", 0.171, "km"),
+            MockEmissionFactorRecord("transport", "hybrid_car", 0.095, "km"),
+            MockEmissionFactorRecord("transport", "cng_car", 0.110, "km"),
+            MockEmissionFactorRecord("transport", "auto_rickshaw", 0.090, "km"),
             
             # Appliances / Electricity
             MockEmissionFactorRecord("electricity", "grid electricity", 0.70, "kWh"),
@@ -104,7 +115,7 @@ def test_nlp_parser_basic():
     """
     res1 = parse_activity_text("1 plate curd rice")
     assert res1["category"] == "food"
-    assert res1["item"] == "curd rice"
+    assert res1["item"] == "Curd Rice"
     assert res1["quantity"] == 1.0
     assert res1["unit"] == "plate"
 
@@ -116,14 +127,14 @@ def test_nlp_parser_basic():
 
     res3 = parse_activity_text("Used AC for 5 hours")
     assert res3["category"] == "appliances"
-    assert res3["item"] == "ac"
+    assert res3["item"] == "air_conditioner"
     assert res3["quantity"] == 5.0
     assert res3["unit"] == "hours"
 
     # NLP maps 'twice' for washing machine directly to 'hours' (1h per run)
     res4 = parse_activity_text("Used washing machine twice")
     assert res4["category"] == "appliances"
-    assert res4["item"] == "washing machine"
+    assert res4["item"] == "washing_machine"
     assert res4["quantity"] == 2.0
     assert res4["unit"] == "hours"
 
@@ -164,6 +175,24 @@ def test_transport_calculations(monkeypatch):
     emissions, meta = calculate_transport_emission(db, "petrol car", 10.0, "miles")
     assert abs(meta["distance_km"] - 16.09) < 0.02
 
+    # Test electric train: 25 km, factor: 0.020 -> 0.50 kgCO2e
+    emissions, meta = calculate_transport_emission(db, "electric_train", 25.0, "km")
+    assert meta["vehicle_mapped"] == "electric_train"
+    assert abs(meta["emission_factor"] - 0.020) < 0.001
+    assert abs(emissions - 0.50) < 0.01
+
+    # Test electric bus: 20 km, factor: 0.060 -> 1.20 kgCO2e
+    emissions, meta = calculate_transport_emission(db, "electric_bus", 20.0, "km")
+    assert meta["vehicle_mapped"] == "electric_bus"
+    assert abs(meta["emission_factor"] - 0.060) < 0.001
+    assert abs(emissions - 1.20) < 0.01
+
+    # Test electric scooter: 15 km, factor: 0.015 -> 0.225 kgCO2e
+    emissions, meta = calculate_transport_emission(db, "electric_scooter", 15.0, "km")
+    assert meta["vehicle_mapped"] == "electric_scooter"
+    assert abs(meta["emission_factor"] - 0.015) < 0.001
+    assert abs(emissions - 0.225) < 0.01
+
 def test_appliance_calculations(monkeypatch):
     """
     Tests appliance calculation engine.
@@ -177,3 +206,20 @@ def test_appliance_calculations(monkeypatch):
     emissions, meta = calculate_appliance_emission(db, "ac", 5.0)
     assert abs(emissions - 5.25) < 0.01
     assert meta["total_kwh"] == 7.5
+
+def test_forecast_fallback_and_generate():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.utils.cache import global_cache
+    
+    client = TestClient(app)
+    
+    # Clear cache first to ensure a clean slate
+    global_cache.clear()
+    
+    # Verify forecast endpoint returns 503 Service Unavailable during the stabilization sprint
+    response = client.get("/api/v1/analytics/forecast?username=test_user&generate=false")
+    assert response.status_code == 503
+    
+    response_gen = client.get("/api/v1/analytics/forecast?username=test_user&generate=true")
+    assert response_gen.status_code == 503

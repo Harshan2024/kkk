@@ -66,7 +66,7 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
   const [activeTab, setActiveTab] = useState<"historical" | "forecast">("historical");
   const [selectedModel, setSelectedModel] = useState("prophet");
   
-  const { forecastData, forecastLoading, fetchForecast, systemHealth } = useAIStore();
+  const { forecastData, forecastLoading, forecastStatus, fetchForecast, systemHealth } = useAIStore();
   const dbStatus = systemHealth?.database;
   const aiStatus = systemHealth?.ai;
 
@@ -78,7 +78,7 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
   // Fetch forecast when model changes
   useEffect(() => {
     if (isMounted && activeTab === "forecast" && aiStatus !== "offline") {
-      fetchForecast(selectedModel);
+      fetchForecast(selectedModel, 30, true);
     }
   }, [selectedModel, activeTab, isMounted, aiStatus]);
 
@@ -249,15 +249,26 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
             /* AI Forecasting Chart Panel */
             <div className="h-64 w-full relative">
               {forecastLoading ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/10 rounded-2xl">
+                <div className="absolute inset-0 flex items-center justify-center bg-black/10 rounded-2xl z-10">
                   <div className="flex flex-col items-center space-y-2">
                     <RefreshCw className="w-6 h-6 animate-spin text-amber-500" />
-                    <span className="text-[10px] text-amber-500 uppercase tracking-widest font-black animate-pulse">Running Calculations...</span>
+                    <span className="text-[10px] text-amber-500 uppercase tracking-widest font-black animate-pulse">Loading Forecast...</span>
                   </div>
                 </div>
               ) : null}
               
-              {aiStatus === "offline" || (!forecastLoading && (!forecastData || forecastData.length === 0)) ? (
+              {forecastStatus === "pending" ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-stone-950/40 rounded-2xl border border-dashed border-white/5 p-4 text-center z-10">
+                  <BrainCircuit className="w-10 h-10 text-amber-500 mb-2 animate-pulse" />
+                  <p className="text-xs font-bold text-stone-300 mb-4">Forecast has not been generated yet.</p>
+                  <button
+                    onClick={() => fetchForecast(selectedModel, 30, true)}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-black font-extrabold text-[10px] uppercase rounded-xl tracking-wider transition-all cursor-pointer active:scale-95 shadow shadow-amber-500/10"
+                  >
+                    Generate Forecast
+                  </button>
+                </div>
+              ) : aiStatus === "offline" || (!forecastLoading && (!forecastData || forecastData.length === 0)) ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-stone-950/40 rounded-2xl border border-dashed border-white/5">
                   <span className="text-xs font-black text-rose-400 uppercase tracking-widest">AI service temporarily unavailable.</span>
                 </div>

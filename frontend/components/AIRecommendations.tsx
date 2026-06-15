@@ -131,10 +131,9 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
 
         {/* Recommendations list */}
         {loading ? (
-          <div className="space-y-2 animate-pulse">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-16 rounded-2xl bg-white/5 border-white/5"></div>
-            ))}
+          <div className="space-y-2 animate-pulse flex flex-col justify-center items-center min-h-[220px]">
+            <Sparkles className="w-6 h-6 text-amber-500 animate-spin mb-2" />
+            <span className="text-stone-400 text-[10px] font-black uppercase tracking-widest animate-pulse">Loading Insights...</span>
           </div>
         ) : activeInsights.length === 0 ? (
           <div className="flex items-center justify-center min-h-[200px]">

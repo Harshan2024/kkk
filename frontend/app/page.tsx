@@ -93,6 +93,7 @@ function HomeContent() {
   const {
     summary,
     insights,
+    insightsLoading,
     achievements,
     activities,
     loading,
@@ -160,15 +161,22 @@ function HomeContent() {
 
           {/* Error Alert banner */}
           {error && (
-            <div className="p-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-400 text-xs font-bold flex items-center justify-between shadow-lg shadow-rose-500/5 animate-in fade-in">
-              <span>{error}</span>
-              <button
-                onClick={loadDashboardData}
-                className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 rounded-xl transition-all text-[10px] font-black uppercase cursor-pointer"
-              >
-                Retry Connection
-              </button>
-            </div>
+            error === "Reconnecting to database..." ? (
+              <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-400 text-xs font-bold flex items-center gap-3 shadow-lg shadow-amber-500/5 animate-in fade-in select-none">
+                <span className="w-3.5 h-3.5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                <span>Reconnecting to database... Running in read-only mode.</span>
+              </div>
+            ) : (
+              <div className="p-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-400 text-xs font-bold flex items-center justify-between shadow-lg shadow-rose-500/5 animate-in fade-in">
+                <span>{error}</span>
+                <button
+                  onClick={loadDashboardData}
+                  className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 rounded-xl transition-all text-[10px] font-black uppercase cursor-pointer"
+                >
+                  Retry Connection
+                </button>
+              </div>
+            )
           )}
 
           {/* Mobile Layout Menu Button */}
@@ -354,7 +362,7 @@ function HomeContent() {
                   <CategoryDonutChart summary={summary} />
                 </ErrorBoundary>
                 <ErrorBoundary>
-                  <AIRecommendations insights={insights} loading={loading} />
+                  <AIRecommendations insights={insights} loading={insightsLoading} />
                 </ErrorBoundary>
                 <ErrorBoundary>
                   <HabitInsights />

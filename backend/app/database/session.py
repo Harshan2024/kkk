@@ -9,7 +9,7 @@ the backend enters a degraded-but-running state instead of crashing.
 """
 import time
 import logging
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
 from app.config.config import settings
@@ -18,6 +18,19 @@ from app.utils.logger import log_structured
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("carbontracker.database")
+
+def register_engine_events(bind_engine):
+    @event.listens_for(bind_engine, "before_cursor_execute")
+    def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        context._query_start_time = time.perf_counter()
+
+    @event.listens_for(bind_engine, "after_cursor_execute")
+    def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        if hasattr(context, "_query_start_time"):
+            total_time = (time.perf_counter() - context._query_start_time) * 1000
+            if total_time > 500:
+                log_structured("WARNING", "database_query", f"Query exceeded 500ms: {statement} took {total_time:.2f}ms")
+                print(f"[WARNING] Database query exceeded 500ms: {total_time:.2f}ms for: {statement[:200]}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OFFLINE SAFE MODE
@@ -44,17 +57,20 @@ if not settings.DATABASE_URL:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    register_engine_events(engine)
 else:
     try:
         # Create SQLAlchemy engine with resilient connection pooling
         engine = create_engine(
             settings.DATABASE_URL,
             pool_pre_ping=True,
-            pool_size=15,
-            max_overflow=25,
+            pool_size=5,
+            max_overflow=5,
             pool_recycle=300,
-            pool_timeout=15,
+            pool_timeout=3,
+            connect_args={"connect_timeout": 3},
         )
+        register_engine_events(engine)
     except Exception as e:
         log_structured(
             level="CRITICAL",
@@ -69,6 +85,7 @@ else:
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
+        register_engine_events(engine)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -117,12 +134,14 @@ def verify_database_connection(retries: int = 3, base_delay: float = 0.5) -> boo
         return False
 
     log_structured("INFO", "database_session", f"Verifying PostgreSQL database connection (Retries: {retries})...")
+    start_time = time.perf_counter()
     for attempt in range(1, retries + 1):
         try:
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-                conn.commit()
-            log_structured("INFO", "database_session", ">>> PostgreSQL Database connection verified successfully.")
+            elapsed_time = (time.perf_counter() - start_time) * 1000
+            print(f"Database Connection Time: {elapsed_time:.2f}ms")
+            log_structured("INFO", "database_session", f"Database Connection Time: {elapsed_time:.2f}ms")
             return True
         except Exception as e:
             delay = base_delay * (2 ** (attempt - 1))
@@ -138,8 +157,57 @@ def verify_database_connection(retries: int = 3, base_delay: float = 0.5) -> boo
                 time.sleep(delay)
 
     # All retries failed — enter read-only degraded mode
+    elapsed_time = (time.perf_counter() - start_time) * 1000
+    print(f"Database Connection Time: {elapsed_time:.2f}ms (failed)")
+    log_structured("INFO", "database_session", f"Database Connection Time: {elapsed_time:.2f}ms (failed)")
     enter_offline_mode()
     return False
+
+
+# Throttled health check states
+LAST_DB_CHECK_TIME = 0.0
+DB_CHECK_THROTTLE_SECONDS = 5.0
+LAST_DB_CHECK_RESULT = True
+
+def check_database_health_fast() -> bool:
+    """
+    Performs a fast, single-attempt check by checking out a connection from the pool.
+    With pool_pre_ping=True, checking out a connection automatically executes a ping query.
+    Returns True if database is reachable, False otherwise.
+    """
+    if OFFLINE_MODE:
+        return False
+    try:
+        with engine.connect() as conn:
+            pass
+        return True
+    except Exception:
+        return False
+
+def check_database_health_throttled() -> bool:
+    """
+    Performs a database health check, throttled to prevent spamming
+    and blocking the server when the database is down.
+    Uses a background thread to perform the actual check so it never blocks the request thread.
+    """
+    global LAST_DB_CHECK_TIME, LAST_DB_CHECK_RESULT
+    if OFFLINE_MODE:
+        return False
+        
+    now = time.time()
+    if now - LAST_DB_CHECK_TIME >= DB_CHECK_THROTTLE_SECONDS:
+        LAST_DB_CHECK_TIME = now
+        def run_health_check_bg():
+            global LAST_DB_CHECK_RESULT
+            try:
+                LAST_DB_CHECK_RESULT = check_database_health_fast()
+            except Exception:
+                LAST_DB_CHECK_RESULT = False
+        import threading
+        threading.Thread(target=run_health_check_bg, daemon=True).start()
+        
+    return LAST_DB_CHECK_RESULT
+
 
 
 def get_db():

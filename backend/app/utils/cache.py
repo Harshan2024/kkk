@@ -43,6 +43,27 @@ class InProcessCache:
         except Exception:
             return False
 
+    def delete_pattern(self, pattern: str) -> bool:
+        if self.force_degraded:
+            return False
+        try:
+            keys_to_del = [k for k in self._store.keys() if pattern in k]
+            for k in keys_to_del:
+                self.delete(k)
+            return True
+        except Exception:
+            return False
+
+    def clear(self) -> bool:
+        if self.force_degraded:
+            return False
+        try:
+            self._store.clear()
+            self._expires.clear()
+            return True
+        except Exception:
+            return False
+
     def exists(self, key: str) -> bool:
         if self.force_degraded:
             return False

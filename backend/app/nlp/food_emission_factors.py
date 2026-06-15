@@ -43,8 +43,8 @@ _RAW: list[dict] = [
         "unit": "plate",
     },
     {
-        "name": "Plain Dosa",
-        "keywords": ["plain dosa", "dosa"],
+        "name": "dosa",
+        "keywords": ["plain dosa", "paneer dosa", "dosa"],
         "co2_kg": 0.60,
         "unit": "plate",
     },

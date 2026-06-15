@@ -51,18 +51,28 @@ export const HabitInsights = React.memo(function HabitInsights() {
 
   if (loading) {
     return (
-      <div className="glass-card rounded-3xl p-5 sm:p-6 flex flex-col justify-between h-[360px] animate-pulse">
-        <div className="h-6 bg-white/10 rounded w-1/2 mb-4" />
-        <div className="space-y-3 flex-1">
-          <div className="h-10 bg-white/5 rounded-2xl w-full" />
-          <div className="h-10 bg-white/5 rounded-2xl w-full" />
-          <div className="h-10 bg-white/5 rounded-2xl w-full" />
+      <div className="glass-card rounded-3xl p-5 sm:p-6 flex flex-col justify-between h-[360px] select-none">
+        <div>
+          <div className="flex items-center space-x-2.5 pb-3 border-b border-white/5 mb-3">
+            <div className="w-6 h-6 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+              <Brain className="w-3.5 h-3.5 text-emerald-450 animate-pulse" />
+            </div>
+            <h3 className="font-extrabold text-xs text-stone-300 uppercase tracking-widest">
+              AI Habit Analysis
+            </h3>
+          </div>
+          <div className="flex flex-col items-center justify-center min-h-[220px] border border-dashed border-white/5 rounded-2xl bg-white/[0.01] p-4 text-center">
+            <Brain className="w-8 h-8 text-amber-550 mb-2 animate-spin" />
+            <span className="text-stone-400 text-[10px] font-black uppercase tracking-widest animate-pulse">
+              Loading Insights...
+            </span>
+          </div>
         </div>
       </div>
     );
   }
 
-  if (!analysisData || analysisData.insufficient_data) {
+  if (!analysisData || analysisData.insufficient_data || analysisData.status === "temporarily_unavailable") {
     return (
       <div className="glass-card rounded-3xl p-5 sm:p-6 flex flex-col justify-between h-[360px]">
         <div>
@@ -77,7 +87,9 @@ export const HabitInsights = React.memo(function HabitInsights() {
           <div className="flex flex-col items-center justify-center min-h-[220px] border border-dashed border-white/5 rounded-2xl bg-white/[0.01] p-4 text-center">
             <Activity className="w-8 h-8 text-white/20 mb-2 animate-bounce" />
             <span className="text-xs font-semibold text-stone-400">
-              Continue logging activities to unlock AI Habit Analysis.
+              {analysisData?.status === "temporarily_unavailable"
+                ? "Habit Analysis Coming Soon"
+                : "Continue logging activities to unlock AI Habit Analysis."}
             </span>
           </div>
         </div>

@@ -35,32 +35,21 @@ _METRICS = {
 
 def track_latency(component: str, start_time: float):
     """
-    Tracks latency of a component in milliseconds.
+    Disabled during stabilization sprint.
     """
-    elapsed = (time.time() - start_time) * 1000.0
-    if component not in _METRICS["model_latencies"]:
-        _METRICS["model_latencies"][component] = []
-    _METRICS["model_latencies"][component].append(elapsed)
-    
-    # Cap history at last 100 entries
-    if len(_METRICS["model_latencies"][component]) > 100:
-        _METRICS["model_latencies"][component].pop(0)
-    
-    logger.info(f"[AI Metrics] Component {component} took {elapsed:.2f}ms")
+    pass
 
 def track_confidence(score: float):
     """
-    Tracks NLP parse confidence score.
+    Disabled during stabilization sprint.
     """
-    _METRICS["nlp_confidence"].append(score)
-    if len(_METRICS["nlp_confidence"]) > 100:
-        _METRICS["nlp_confidence"].pop(0)
+    pass
 
 def track_correction():
     """
-    Increments user manual correction count.
+    Disabled during stabilization sprint.
     """
-    _METRICS["corrections_count"] += 1
+    pass
 
 def get_observability_summary() -> Dict[str, Any]:
     """

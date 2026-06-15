@@ -66,10 +66,11 @@ def calculate_streaks(db: Session, user_id: int) -> dict:
     """
     today = date.today()
     
-    # Query all daily scores sorted by date ascending
+    # Query daily scores sorted by date descending with a limit to optimize performance, then reverse
     scores = db.query(SustainabilityScore).filter(
         SustainabilityScore.user_id == user_id
-    ).order_by(SustainabilityScore.date.asc()).all()
+    ).order_by(SustainabilityScore.date.desc()).limit(365).all()
+    scores.reverse()
     
     if not scores:
         return {
@@ -273,7 +274,7 @@ def generate_and_track_quests(db: Session, user_id: int) -> list[dict]:
     
     return quests
 
-def calculate_user_xp_and_level(db: Session, user_id: int) -> dict:
+def calculate_user_xp_and_level(db: Session, user_id: int, streaks=None, quests=None, ach_count=None) -> dict:
     """
     Computes total user XP and resolves their Level name and badge unlocks.
     """
@@ -281,37 +282,36 @@ def calculate_user_xp_and_level(db: Session, user_id: int) -> dict:
     total_xp = 150
     
     # 2. Add XP for logged activities
-    activities = db.query(Activity).filter(Activity.user_id == user_id).all()
-    for act in activities:
-        # Low impact: general logs, electronics, milk
-        # Medium impact: metro, bus, train, vegetarian food, electricity <= 1h
-        # High impact: walking, cycling, recycling
-        if act.category == "transport" and act.item in ("walking", "cycling"):
-            total_xp += 30
-        elif act.category == "transport" and act.item in ("metro", "train", "bus"):
-            total_xp += 15
-        elif act.category == "food" and act.item in ("vegetables", "curd rice", "dosa", "idli", "paneer"):
-            total_xp += 15
-        elif act.category == "appliances" and act.quantity <= 1.0:
-            total_xp += 15
-        elif act.category == "waste" and act.item in ("recycling", "organic waste"):
-            total_xp += 30
-        elif act.calculated_value <= 1.0:
-            # General low carbon choices
-            total_xp += 5
-        else:
-            total_xp += 2
+    from sqlalchemy import case, and_
+    xp_val = db.query(
+        func.sum(
+            case(
+                (and_(Activity.category == "transport", Activity.item.in_(["walking", "cycling"])), 30),
+                (and_(Activity.category == "transport", Activity.item.in_(["metro", "train", "bus"])), 15),
+                (and_(Activity.category == "food", Activity.item.in_(["vegetables", "curd rice", "dosa", "idli", "paneer"])), 15),
+                (and_(Activity.category == "appliances", Activity.quantity <= 1.0), 15),
+                (and_(Activity.category == "waste", Activity.item.in_(["recycling", "organic waste"])), 30),
+                (Activity.calculated_value <= 1.0, 5),
+                else_=2
+            )
+        )
+    ).filter(Activity.user_id == user_id).scalar()
+    
+    total_xp += int(xp_val or 0)
             
     # 3. Add XP for achievements
-    ach_count = db.query(Achievement).filter(Achievement.user_id == user_id).count()
+    if ach_count is None:
+        ach_count = db.query(Achievement).filter(Achievement.user_id == user_id).count()
     total_xp += ach_count * 50
     
     # 4. Add XP for streaks
-    streaks = calculate_streaks(db, user_id)
-    total_xp += streaks["current_streak"] * 10
+    if streaks is None:
+        streaks = calculate_streaks(db, user_id)
+    total_xp += streaks.get("current_streak", 0) * 10
     
     # 5. Add XP for completed quests (calculated weekly)
-    quests = generate_and_track_quests(db, user_id)
+    if quests is None:
+        quests = generate_and_track_quests(db, user_id)
     for q in quests:
         if q["progress"] >= q["max"]:
             total_xp += q["xp"]

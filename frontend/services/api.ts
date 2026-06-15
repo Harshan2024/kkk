@@ -20,7 +20,7 @@ import {
   sanitizeChatMessages,
 } from "../utils/validators";
 
-const HOST = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const HOST = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 const BASE_URL = HOST.endsWith("/api/v1") ? HOST : `${HOST}/api/v1`;
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -221,27 +221,45 @@ async function fetchWithTimeout(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const startTime = performance.now();
 
-  // Extract endpoint path for clean logging (strip base URL)
+  const isHealthCheck = url.endsWith("/health") || url.endsWith("/api/system/status");
   const endpoint = url.replace(/^https?:\/\/[^/]+/, "");
+
+  // Debug: log every outgoing request (visible in browser DevTools console)
+  if (process.env.NODE_ENV !== "production" && !isHealthCheck) {
+    console.log(`[CarbonTracker API] Calling: ${options.method || "GET"} ${url}`);
+  }
 
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(timer);
     const duration = Math.round(performance.now() - startTime);
-    logger.info(
-      "API",
-      `[${options.method || "GET"}] ${endpoint} — ${response.status} — ${duration}ms`
-    );
+    if (!isHealthCheck) {
+      logger.info(
+        "API",
+        `[${options.method || "GET"}] ${endpoint} — ${response.status} — ${duration}ms`
+      );
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`[CarbonTracker API] Response: ${response.status} ${url} (${duration}ms)`);
+      }
+    }
     return response;
   } catch (err: unknown) {
     clearTimeout(timer);
     const duration = Math.round(performance.now() - startTime);
     if (err instanceof Error && err.name === "AbortError") {
       logger.warn("API", `[TIMEOUT] ${endpoint} — aborted after ${duration}ms (limit: ${timeoutMs}ms)`);
-      throw new Error(`Request timed out. Please try again. (${timeoutMs / 1000}s limit)`);
+      console.error(`[CarbonTracker API] TIMEOUT: ${url} after ${duration}ms`);
+      throw new Error(`Connection timeout after ${timeoutMs / 1000}s. Please check the backend is running on port 8000.`);
     }
     logger.error("API", `[FAIL] ${endpoint} — network error after ${duration}ms`, err);
-    throw err;
+    console.error(`[CarbonTracker API] NETWORK ERROR: ${url}`, err);
+    // Provide a clear actionable message instead of raw "Failed to fetch"
+    const isDev = process.env.NODE_ENV !== "production";
+    throw new Error(
+      isDev
+        ? `Backend unavailable at ${url}. Ensure the backend is running: cd backend && .venv\\Scripts\\python -m uvicorn app.main:app --port 8000`
+        : "Backend server unavailable. Please try again in a moment."
+    );
   }
 }
 
@@ -257,22 +275,36 @@ async function fetchWithTimeout(
 async function withRetry<T>(
   fn: () => Promise<T>,
   endpoint: string,
+  url: string,
+  method: string,
   maxRetries = 2
 ): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const attemptStart = performance.now();
     try {
       return await fn();
     } catch (err: unknown) {
       lastErr = err;
-      const msg = err instanceof Error ? err.message : "";
+      const duration = Math.round(performance.now() - attemptStart);
+      const msg = err instanceof Error ? err.message : "Unknown error";
       // Don't retry: validation/auth/bad-request errors
       const isHttp4xx = /HTTP 4\d\d/.test(msg);
       if (isHttp4xx || attempt === maxRetries) break;
       const delayMs = 1000 * Math.pow(2, attempt); // 1s, then 2s
+
+      console.warn(
+        `[RETRY WARNING] Attempt ${attempt + 1}/${maxRetries} failed.\n` +
+        `- URL: ${url}\n` +
+        `- Method: ${method}\n` +
+        `- Duration: ${duration}ms\n` +
+        `- Failure Reason: ${msg}\n` +
+        `Retrying in ${delayMs}ms...`
+      );
+
       logger.warn(
         "API",
-        `[RETRY ${attempt + 1}/${maxRetries}] ${endpoint} — retrying in ${delayMs}ms`
+        `[RETRY ${attempt + 1}/${maxRetries}] ${endpoint} failed after ${duration}ms (Reason: ${msg}) — retrying in ${delayMs}ms`
       );
       await new Promise((r) => setTimeout(r, delayMs));
     }
@@ -351,7 +383,7 @@ class ApiService {
     // Only retry safe idempotent GET requests
     const method = (options.method || "GET").toUpperCase();
     const shouldRetry = method === "GET" && retries > 0;
-    return shouldRetry ? withRetry(doFetch, endpoint, retries) : doFetch();
+    return shouldRetry ? withRetry(doFetch, endpoint, url, method, retries) : doFetch();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -425,12 +457,16 @@ class ApiService {
   async getForecast(
     username = "demo_user",
     steps = 30,
-    model = "prophet"
-  ): Promise<ForecastData[]> {
-    const raw = await this.request<unknown>(
-      `/analytics/forecast?username=${username}&steps=${steps}&model=${model}`
+    model = "prophet",
+    generate = false
+  ): Promise<{ status?: string; message?: string; data: ForecastData[] }> {
+    const raw = await this.request<any>(
+      `/analytics/forecast?username=${username}&steps=${steps}&model=${model}&generate=${generate}`
     );
-    return sanitizeForecast(raw);
+    if (raw && typeof raw === "object" && raw.status === "pending") {
+      return { status: "pending", message: raw.message, data: [] };
+    }
+    return { data: sanitizeForecast(raw) };
   }
 
   async getObservabilityMetrics(username = "demo_user"): Promise<ObservabilityMetrics> {
@@ -543,7 +579,7 @@ class ApiService {
 
   async checkHealth(): Promise<HealthStatus> {
     try {
-      const response = await fetchWithTimeout(`${HOST}/health`, {}, 5_000);
+      const response = await fetchWithTimeout(`${HOST}/health`, {}, 15_000);
       if (!response.ok) throw new Error(`Health check ${response.status}`);
       const result = await response.json();
       if (result && typeof result === "object" && "data" in result) return result.data as HealthStatus;
@@ -556,8 +592,8 @@ class ApiService {
 
   async getSystemHealth(): Promise<SystemHealth> {
     try {
-      const response = await fetchWithTimeout(`${HOST}/api/system/status`, {}, 5_000);
-      
+      const response = await fetchWithTimeout(`${HOST}/api/system/status`, {}, 15_000);
+
       if (!response.ok) {
         if (response.status === 404) {
           logger.warn("ApiService", "System status check returned 404 - treating as degraded");
@@ -570,13 +606,13 @@ class ApiService {
             iot: "degraded",
           };
         }
-        
+
         if (response.status === 500) {
           logger.error("ApiService", "System status check returned 500");
         } else {
           logger.warn("ApiService", `System status check returned ${response.status}`);
         }
-        
+
         return {
           backend: "offline",
           database: "offline",
@@ -587,20 +623,20 @@ class ApiService {
           failed: true,
         };
       }
-      
+
       const result = await response.json();
       return result as SystemHealth;
     } catch (err: any) {
       // Only use Logger.error() for 500 server errors, database failures, and unexpected exceptions
       const is500 = err?.message?.includes("500") || err?.status === 500;
       const isDbFailure = err?.message?.includes("database") || err?.message?.toLowerCase().includes("db");
-      
+
       if (is500 || isDbFailure) {
         logger.error("ApiService", "System status fetch failed (critical/db)", { error: err });
       } else {
         logger.warn("ApiService", "System status fetch failed (expected polling failure)", { error: err });
       }
-      
+
       return {
         backend: "offline",
         database: "offline",
