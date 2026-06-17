@@ -10,6 +10,7 @@ from app.nlp.spacy_service import (
 from app.nlp.entity_matcher import get_entity_matcher
 
 LABEL_TO_CATEGORY = {
+    # Transport
     "electric_train": "transport",
     "electric_bus": "transport",
     "electric_scooter": "transport",
@@ -21,18 +22,30 @@ LABEL_TO_CATEGORY = {
     "auto_rickshaw": "transport",
     "domestic_flight": "transport",
     "international_flight": "transport",
-    "air_conditioner": "appliances",
-    "washing_machine": "appliances",
-    "vegetarian_meal": "food",
     "bicycle": "transport",
     "taxi": "transport",
-    "electric_car": "transport"
+    "electric_car": "transport",
+    "metro": "transport",
+    "local_train": "transport",
+    # Appliances
+    "air_conditioner": "appliances",
+    "washing_machine": "appliances",
+    # Food — all PhraseMatcher food labels must be listed here so that
+    # the spaCy fast-path returns category='food' instead of 'lifestyle'
+    "vegetarian_meal": "food",
+    "idli": "food",
+    "dosa": "food",
+    "veg_rice": "food",
+    "curd_rice": "food",
+    "lemon_rice": "food",
+    "paneer_rice": "food",
+    "pongal": "food",
 }
 
 DEFAULT_UNITS = {
     "transport": "km",
     "appliances": "hours",
-    "food": "serving",
+    "food": "plate",
     "lifestyle": "item"
 }
 
@@ -132,13 +145,24 @@ def parse_spacy(text: str) -> Optional[Dict[str, Any]]:
     _shopping_co2 = None
     _wattage_result = None
     
+    if category == "food":
+        from app.nlp.food_emission_factors import lookup_food
+        food_hit = lookup_food(matched_phrase) or lookup_food(item.replace("_", " "))
+        if food_hit:
+            if item != "vegetarian_meal":
+                item = food_hit["name"]
+            _food_co2_kg = food_hit["co2_kg"]
+    
     # Feature 6: Date Context
     date_ctx = extract_date_context(normalized_text)
     
     # Return the exact dictionary format that parse_activity_text returns
+    activity_val = "veg_meal" if (category == "food" and item == "vegetarian_meal") else (item.lower().replace(" ", "_") if item else None)
+
     return {
         "category": category,
         "item": item,
+        "activity": activity_val,
         "quantity": quantity,
         "unit": unit,
         "confidence": confidence,

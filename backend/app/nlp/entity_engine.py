@@ -260,8 +260,15 @@ def extract_entities(text: str, intent: Optional[str] = None) -> dict:
         "confidence": confidence,
         "matched_by": matched_by,
         "intent": intent,
+        "category": intent,
         key_name: entity_val
     }
+    
+    # For Stage-2 Multi-Activity compatibility, include normalized 'activity' field
+    if intent == "food" and str(entity_val).lower() == "vegetarian_meal":
+        result["activity"] = SmartString("veg_meal")
+    else:
+        result["activity"] = SmartString(str(entity_val).lower().replace(" ", "_"))
     
     # Feature 6: Date context extraction
     date_ctx = extract_date_context(normalized_text)
@@ -373,27 +380,30 @@ def extract_multi_entities(text: str) -> list[dict]:
     """
     cleaned = normalize_units_in_text(text)
     
-    splitter_pattern = r'\s+and\s+also\s+|\s+as\s+well\s+as\s+|\s+along\s+with\s+|\s+then\s+|\s+plus\s+|\s+and\s+|,\s*'
+    splitter_pattern = r'\s+and\s+also\s+|\s+as\s+well\s+as\s+|\s+along\s+with\s+|\s+then\s+|\s+plus\s+|\s+and\s+|(?<!\d),\s*|,\s*(?!\d)'
     segments = re.split(splitter_pattern, cleaned, flags=re.IGNORECASE)
-    segments = [s.strip() for s in segments if s.strip()]
     
-    if len(segments) <= 1:
-        res = extract_entities(cleaned)
-        if res.get("entity") != "unknown":
-            return [res]
-        return []
-        
     results = []
     first_intent = None
     
     for seg in segments:
-        intent_res = detect_intent(seg)
+        seg_clean = seg.strip()
+        if not seg_clean:
+            continue
+            
+        # Strip leading conjunction/transition prefixes
+        leading_pattern = r'^(?:and\s+also|as\s+well\s+as|along\s+with|and|then|plus|also|with)\s+'
+        seg_clean = re.sub(leading_pattern, '', seg_clean, flags=re.IGNORECASE).strip()
+        if not seg_clean:
+            continue
+            
+        intent_res = detect_intent(seg_clean)
         intent = intent_res.intent if intent_res.intent != "unknown" else None
         
         if not intent and first_intent:
             intent = first_intent
             
-        res = extract_entities(seg, intent=intent)
+        res = extract_entities(seg_clean, intent=intent)
         if res.get("entity") != "unknown":
             if not first_intent:
                 first_intent = res.get("intent") or intent

@@ -86,7 +86,7 @@ _RAW: list[dict] = [
     },
     {
         "name": "Veg Meals",
-        "keywords": ["south indian meals", "veg meals"],
+        "keywords": ["south indian meals", "veg meals", "veg meal", "vegetarian meal", "vegetarian meals"],
         "co2_kg": 1.20,
         "unit": "plate",
     },

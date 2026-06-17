@@ -19,15 +19,24 @@ class EntityMatcher:
                 "diesel_car": ["diesel car"],
                 "hybrid_car": ["hybrid car"],
                 "cng_car": ["cng car"],
-                "auto_rickshaw": ["auto rickshaw"],
+                "auto_rickshaw": ["auto rickshaw", "auto"],
                 "domestic_flight": ["domestic flight"],
                 "international_flight": ["international flight"],
                 "air_conditioner": ["air conditioner", "ac", "air conditioning"],
                 "washing_machine": ["washing machine"],
-                "vegetarian_meal": ["vegetarian meal"],
+                "vegetarian_meal": ["vegetarian meal", "veg meal"],
                 "bicycle": ["bike", "bicycle", "cycle"],
-                "taxi": ["cab", "taxi"],
-                "electric_car": ["ev", "electric car"]
+                "taxi": ["cab", "taxi", "uber", "ola"],
+                "electric_car": ["ev", "electric car"],
+                "metro": ["metro", "subway"],
+                "local_train": ["local train"],
+                "veg_rice": ["veg rice", "veg fried rice"],
+                "curd_rice": ["curd rice"],
+                "lemon_rice": ["lemon rice"],
+                "paneer_rice": ["paneer rice"],
+                "dosa": ["dosa", "plain dosa", "paneer dosa", "masala dosa"],
+                "idli": ["idli", "idlis", "idly"],
+                "pongal": ["pongal"]
             }
             for label, terms in self.patterns.items():
                 pattern_docs = [self.nlp.make_doc(text) for text in terms]

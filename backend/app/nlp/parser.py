@@ -809,9 +809,13 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
     from app.nlp.entity_engine import extract_date_context
     date_ctx = extract_date_context(text)
 
+    # Standardize 'activity' field
+    activity_val = "veg_meal" if (category == "food" and item == "vegetarian_meal") else (item.lower().replace(" ", "_") if item else None)
+
     return {
         "category": category,
         "item": item,
+        "activity": activity_val,
         "quantity": quantity,
         "unit": unit,
         "confidence": round(confidence, 2),
@@ -836,32 +840,97 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
 
 def parse_compound_activity(text: str) -> List[Dict[str, Any]]:
     """
-    Splits compound natural language strings (e.g. using 'and', 'then', 'as well as', 'along with')
-    into multiple individual activity dictionaries.
+    Stage-2 Multi-Activity NLP — splits compound natural language input into
+    individual activity dictionaries and parses each independently.
+
+    Splitting conjunctions handled:
+        and also | as well as | along with | then | plus | and | , (comma)
+
+    Each segment is parsed independently through the full spaCy pipeline
+    (parse_spacy → parse_activity_text) so Stage-1 behaviour is fully
+    preserved for single-activity inputs.
+
+    Food rescue pass:
+        The spaCy PhraseMatcher fast-path sometimes returns category='lifestyle'
+        for food items (e.g. idli, veg rice) when the label→category mapping
+        is incomplete.  After parsing we check whether the item name resolves
+        in the food emission KB and re-classify such segments as 'food'.
     """
-    # Regex splitting on: and also, as well as, along with, then, plus, and, commas
+    # Regex splitting on conjunctions — ordered longest-first to avoid
+    # partial matches (e.g. "and also" must be tried before bare "and").
+    # Uses lookarounds to avoid splitting thousands separator commas like 1,000.
     parts = re.split(
-        r'\s+and\s+also\s+|\s+as\s+well\s+as\s+|\s+along\s+with\s+|\s+then\s+|\s+plus\s+|\s+and\s+|,\s*',
+        r'\s+and\s+also\s+|\s+as\s+well\s+as\s+|\s+along\s+with\s+|\s+then\s+|\s+plus\s+|\s+and\s+|(?<!\d),\s*|,\s*(?!\d)',
         text,
         flags=re.IGNORECASE
     )
+
     results = []
-    
+
     for part in parts:
         part_clean = part.strip()
         if not part_clean:
             continue
-            
-        # Parse individual part
+
+        # Strip leading conjunction/transition prefixes
+        leading_pattern = r'^(?:and\s+also|as\s+well\s+as|along\s+with|and|then|plus|also|with)\s+'
+        part_clean = re.sub(leading_pattern, '', part_clean, flags=re.IGNORECASE).strip()
+        if not part_clean:
+            continue
+
+        # Parse this segment independently through the full pipeline
         parsed = parse_activity_text(part_clean)
-        
-        # Keep if it matched a valid category or keywords (not generic fallback)
-        # Or if it's the only part
-        if len(parts) == 1 or parsed["category"] != "lifestyle" or parsed["confidence"] > 0.40:
+
+        # Stamp the original segment text (not the full compound sentence)
+        parsed["original_text"] = part_clean
+
+        # ── Food rescue pass ─────────────────────────────────────────────────
+        if parsed.get("category") == "lifestyle":
+            try:
+                from app.nlp.food_emission_factors import lookup_food
+                item_name = parsed.get("item") or ""
+                # Try matching the item label as a keyword against the food KB
+                food_hit = lookup_food(item_name) or lookup_food(part_clean)
+                if food_hit:
+                    parsed["category"] = "food"
+                    parsed["item"] = food_hit["name"]
+                    if parsed.get("unit") in (None, "item", "unit", "serving"):
+                        parsed["unit"] = food_hit["unit"]
+                    # Attach pre-computed CO2 so calculate_emissions uses it directly
+                    if parsed.get("food_co2_kg") is None:
+                        parsed["food_co2_kg"] = food_hit["co2_kg"]
+                    # Preserve confidence from spaCy match if it was high
+                    if parsed.get("confidence", 0) < 0.80:
+                        parsed["confidence"] = 0.90
+                        parsed["ambiguity"] = 0.10
+            except Exception:
+                pass  # food rescue is best-effort; never crash
+
+        # Update parsed 'activity' key after food rescue pass
+        item_val = parsed.get("item")
+        if parsed.get("category") == "food" and item_val == "vegetarian_meal":
+            parsed["activity"] = "veg_meal"
+        else:
+            if item_val:
+                parsed["activity"] = item_val.lower().replace(" ", "_")
+            else:
+                parsed["activity"] = None
+
+        # Keep this segment if:
+        #  - there is only one part (always keep), OR
+        #  - it resolved to a real category (not lifestyle), OR
+        #  - confidence is reasonable (> 0.30)
+        keep = (
+            len(parts) == 1
+            or parsed["category"] != "lifestyle"
+            or parsed["confidence"] > 0.30
+        )
+        if keep:
             results.append(parsed)
-            
+
     if not results:
-        # Emergency single fallback
+        # Emergency single fallback — parse the full text as one activity
         results.append(parse_activity_text(text))
-        
+
     return results
+
