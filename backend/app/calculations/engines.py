@@ -3,6 +3,18 @@ from sqlalchemy.orm import Session
 from app.models import EmissionFactor
 from app.emissions.factors import FOOD_UNIT_TO_KG, DEFAULT_EMISSION_FACTORS
 
+from app.carbon.transport_factors import TRANSPORT_FACTORS
+from app.carbon.transport_formula import calculate_transport_co2
+from app.carbon.food_factors import FOOD_FACTORS
+from app.carbon.food_formula import calculate_food_co2
+from app.carbon.appliance_factors import APPLIANCE_WATTS, GRID_FACTORS
+from app.carbon.appliance_formula import calculate_appliance_co2
+from app.carbon.waste_factors import WASTE_FACTORS
+from app.carbon.waste_formula import calculate_waste_co2
+from app.carbon.shopping_factors import SHOPPING_FACTORS
+from app.carbon.shopping_formula import calculate_shopping_co2
+
+
 class CachedEmissionFactor:
     def __init__(self, category: str, item_key: str, display_name: str, factor: float, unit: str, region: str, source: str):
         self.category = category
@@ -187,7 +199,61 @@ def calculate_food_emission(db: Session, item: str, quantity: float, unit: str, 
 
     item_clean = item.lower().strip()
     unit_clean = unit.lower().strip()
-    
+
+    # Determine weight in kg
+    weight_kg = 0.0
+    if unit_clean in ["kg", "kgs", "kilogram", "kilograms"]:
+        weight_kg = quantity
+    elif unit_clean in ["g", "gs", "gram", "grams"]:
+        weight_kg = quantity / 1000.0
+    elif unit_clean in ["plate", "plates", "bowl", "bowls", "cup", "cups", "glass", "glasses", "serving", "servings"]:
+        lookup_key = f"{unit_clean[:-1] if unit_clean.endswith('s') else unit_clean} {item_clean}"
+        if lookup_key in FOOD_UNIT_TO_KG:
+            weight_kg = FOOD_UNIT_TO_KG[lookup_key] * quantity
+        elif item_clean in FOOD_UNIT_TO_KG:
+            weight_kg = FOOD_UNIT_TO_KG[item_clean] * quantity
+        elif unit_clean[:-1] if unit_clean.endswith('s') else unit_clean in FOOD_UNIT_TO_KG:
+            weight_kg = FOOD_UNIT_TO_KG[unit_clean[:-1] if unit_clean.endswith('s') else unit_clean] * quantity
+        else:
+            weight_kg = 0.250 * quantity
+    else:
+        if item_clean in FOOD_UNIT_TO_KG:
+            weight_kg = FOOD_UNIT_TO_KG[item_clean] * quantity
+        else:
+            weight_kg = 0.200 * quantity
+
+    # Try matching using food_formula and FOOD_FACTORS
+    food_key = None
+    if item_clean in RECIPES:
+        pass
+    elif item_clean in FOOD_FACTORS:
+        food_key = item_clean
+    else:
+        for f in FOOD_FACTORS:
+            if f in item_clean or item_clean in f:
+                food_key = f
+                break
+
+    if food_key:
+        factor_info = FOOD_FACTORS[food_key]
+        factor_val = factor_info["factor"]
+        source_val = factor_info["source"]
+        
+        formula_res = calculate_food_co2(weight_kg, factor_val, source_val)
+        
+        metadata = {
+            "co2": formula_res["co2"],
+            "factor": formula_res["factor"],
+            "source": formula_res["source"],
+            "method": "formula",
+            # legacy keys for backwards compatibility:
+            "calculation_type": "weight_based",
+            "mapped_item": food_key,
+            "estimated_weight_kg": round(weight_kg, 3),
+            "emission_factor": factor_val
+        }
+        return formula_res["co2"], metadata
+
     # 1. Resolve composite recipe
     if item_clean in RECIPES:
         recipe = RECIPES[item_clean]
@@ -235,33 +301,6 @@ def calculate_food_emission(db: Session, item: str, quantity: float, unit: str, 
         
     factor_val = factor_record.factor if factor_record else 0.5
     item_mapped = factor_record.item_key if factor_record else "vegetables"
-    
-    # Normalize units to weight (kg)
-    weight_kg = 0.0
-    
-    # Check standard units
-    if unit_clean in ["kg", "kgs", "kilogram", "kilograms"]:
-        weight_kg = quantity
-    elif unit_clean in ["g", "gs", "gram", "grams"]:
-        weight_kg = quantity / 1000.0
-    elif unit_clean in ["plate", "plates", "bowl", "bowls", "cup", "cups", "glass", "glasses", "serving", "servings"]:
-        # Try item + unit first (e.g. "plate curd rice", "cup milk")
-        lookup_key = f"{unit_clean[:-1] if unit_clean.endswith('s') else unit_clean} {item_clean}"
-        if lookup_key in FOOD_UNIT_TO_KG:
-            weight_kg = FOOD_UNIT_TO_KG[lookup_key] * quantity
-        elif item_clean in FOOD_UNIT_TO_KG:
-            weight_kg = FOOD_UNIT_TO_KG[item_clean] * quantity
-        elif unit_clean[:-1] if unit_clean.endswith('s') else unit_clean in FOOD_UNIT_TO_KG:
-            weight_kg = FOOD_UNIT_TO_KG[unit_clean[:-1] if unit_clean.endswith('s') else unit_clean] * quantity
-        else:
-            # Default plate/bowl size: 250g
-            weight_kg = 0.250 * quantity
-    else:
-        # Default single item size if unrecognized (e.g., "1 chicken" = 500g or 1kg)
-        if item_clean in FOOD_UNIT_TO_KG:
-            weight_kg = FOOD_UNIT_TO_KG[item_clean] * quantity
-        else:
-            weight_kg = 0.200 * quantity  # default 200g
             
     emissions = weight_kg * factor_val
     metadata = {
@@ -269,9 +308,7 @@ def calculate_food_emission(db: Session, item: str, quantity: float, unit: str, 
         "mapped_item": item_mapped,
         "estimated_weight_kg": round(weight_kg, 3),
         "emission_factor": factor_val,
-        "source": factor_record.source if factor_record else "estimated"
     }
-    
     return emissions, metadata
 
 def calculate_transport_emission(db: Session, vehicle: str, distance: float, unit: str, region: str = "Global") -> Tuple[float, Dict[str, Any]]:
@@ -286,8 +323,73 @@ def calculate_transport_emission(db: Session, vehicle: str, distance: float, uni
     distance_km = distance
     if unit_clean in ["mile", "miles", "mi"]:
         distance_km = distance * 1.60934
+
+    # Resolve vehicle key using existing rules:
+    vehicle_key = vehicle_clean
+    if vehicle_clean in TRANSPORT_FACTORS:
+        vehicle_key = vehicle_clean
+    else:
+        # Apply mapping rules
+        if "car" in vehicle_clean:
+            if "diesel" in vehicle_clean:
+                vehicle_key = "diesel_car"
+            elif "ev" in vehicle_clean or "electric" in vehicle_clean:
+                vehicle_key = "electric_car"
+            elif "hybrid" in vehicle_clean:
+                vehicle_key = "hybrid_car"
+            elif "cng" in vehicle_clean:
+                vehicle_key = "cng_car"
+            else:
+                vehicle_key = "petrol_car"
+        elif "train" in vehicle_clean or "rail" in vehicle_clean:
+            if "electric" in vehicle_clean:
+                vehicle_key = "electric_train"
+            else:
+                vehicle_key = "train"
+        elif "metro" in vehicle_clean or "subway" in vehicle_clean or "tube" in vehicle_clean:
+            vehicle_key = "metro"
+        elif "bus" in vehicle_clean:
+            if "electric" in vehicle_clean:
+                vehicle_key = "electric_bus"
+            else:
+                vehicle_key = "bus"
+        elif "flight" in vehicle_clean or "plane" in vehicle_clean or "flying" in vehicle_clean:
+            vehicle_key = "flight"
+        elif "bike" in vehicle_clean or "motorcycle" in vehicle_clean or "scooter" in vehicle_clean:
+            if "electric" in vehicle_clean:
+                if "scooter" in vehicle_clean:
+                    vehicle_key = "electric_scooter"
+                else:
+                    vehicle_key = "electric_bike"
+            else:
+                vehicle_key = "bike"
+        elif "rickshaw" in vehicle_clean or "auto" in vehicle_clean:
+            vehicle_key = "auto_rickshaw"
+        elif "walk" in vehicle_clean or "cycle" in vehicle_clean or "bicycle" in vehicle_clean:
+            vehicle_key = "walking"
+
+    # Try matching using transport_formula and TRANSPORT_FACTORS
+    lookup_key = vehicle_key.replace("_", " ")
+    if lookup_key in TRANSPORT_FACTORS:
+        factor_info = TRANSPORT_FACTORS[lookup_key]
+        factor_val = factor_info["factor"]
+        source_val = factor_info["source"]
         
-    # Find matching factor
+        formula_res = calculate_transport_co2(distance_km, factor_val, source_val)
+        
+        metadata = {
+            "co2": formula_res["co2"],
+            "factor": formula_res["factor"],
+            "source": formula_res["source"],
+            "method": "formula",
+            # legacy keys:
+            "distance_km": round(distance_km, 2),
+            "vehicle_mapped": vehicle_key,
+            "emission_factor": factor_val
+        }
+        return formula_res["co2"], metadata
+
+    # Find matching factor (fallback)
     factor_record = get_factor_first(db, category="transport", item_key=vehicle_clean, region=region)
     
     # Fallback to general vehicle if no exact match
@@ -361,7 +463,6 @@ def calculate_transport_emission(db: Session, vehicle: str, distance: float, uni
         "emission_factor": factor_val,
         "source": factor_record.source if factor_record else "estimated"
     }
-    
     return emissions, metadata
 
 def calculate_appliance_emission(db: Session, appliance: str, duration_hours: float, quantity: float = 1.0, region: str = "Global") -> Tuple[float, Dict[str, Any]]:
@@ -369,9 +470,70 @@ def calculate_appliance_emission(db: Session, appliance: str, duration_hours: fl
     Calculates carbon emissions for appliance usage.
     Appliance Wattage x Hours x Region Grid Electricity Factor.
     """
-    appliance_clean = appliance.lower().strip()
+    appliance_clean = appliance.lower().strip().replace("_", " ")
     
-    # Get the appliance wattage (stored in 'factor' column)
+    # Resolve appliance key in APPLIANCE_WATTS
+    appliance_key = None
+    if appliance_clean in APPLIANCE_WATTS:
+        appliance_key = appliance_clean
+    else:
+        # Fallback mappings to match APPLIANCE_WATTS keys
+        if "ac" in appliance_clean or "air conditioner" in appliance_clean or "cooling" in appliance_clean:
+            appliance_key = "ac"
+        elif "fan" in appliance_clean or "cooler" in appliance_clean:
+            appliance_key = "fan"
+        elif "fridge" in appliance_clean or "refrigerator" in appliance_clean:
+            appliance_key = "refrigerator"
+        elif "laptop" in appliance_clean or "computer" in appliance_clean or "pc" in appliance_clean:
+            appliance_key = "laptop"
+        elif "tv" in appliance_clean or "television" in appliance_clean:
+            appliance_key = "tv"
+        elif "washing" in appliance_clean or "dryer" in appliance_clean or "washer" in appliance_clean:
+            appliance_key = "washing machine"
+        elif "heater" in appliance_clean or "geyser" in appliance_clean:
+            appliance_key = "water heater"
+        elif "light" in appliance_clean or "bulb" in appliance_clean or "lamp" in appliance_clean:
+            appliance_key = "lights"
+
+    # Get grid factor based on region
+    region_clean = region.lower().strip()
+    if region_clean in GRID_FACTORS:
+        grid_key = region_clean
+    else:
+        grid_key = "global"
+        
+    grid_info = GRID_FACTORS[grid_key]
+    grid_factor = grid_info["factor"]
+    grid_source = grid_info["source"]
+    
+    if appliance_key:
+        watts = APPLIANCE_WATTS[appliance_key]["factor"]
+        appliance_source = APPLIANCE_WATTS[appliance_key]["source"]
+        
+        # Calculate emissions using appliance_formula
+        total_hours = duration_hours * quantity
+        formula_res = calculate_appliance_co2(watts, total_hours, grid_factor, grid_source)
+        
+        total_kwh = (watts * duration_hours * quantity) / 1000.0
+        
+        metadata = {
+            "co2": formula_res["co2"],
+            "factor": formula_res["factor"],
+            "source": formula_res["source"],
+            "method": "formula",
+            # legacy keys:
+            "appliance_mapped": appliance_key,
+            "appliance_watts": watts,
+            "duration_hours": duration_hours,
+            "quantity": quantity,
+            "total_kwh": round(total_kwh, 4),
+            "grid_emission_factor": grid_factor,
+            "region_applied": region,
+            "grid_source": grid_source
+        }
+        return formula_res["co2"], metadata
+
+    # Get the appliance wattage from database/fallback
     factor_record = get_factor_first(db, category="appliances", item_key=appliance_clean, region=region)
     
     # Fallback mappings
@@ -456,6 +618,76 @@ def calculate_generic_emission(db: Session, category: str, item: str, quantity: 
             "method": "Needs Clarification"
         }
         return 0.0, metadata
+
+    # ── Waste Category ──────────────────────────────────────────────────
+    if category_clean == "waste":
+        waste_key = None
+        if item_clean in WASTE_FACTORS:
+            waste_key = item_clean
+        else:
+            for w in WASTE_FACTORS:
+                if w in item_clean or item_clean in w:
+                    waste_key = w
+                    break
+        
+        weight_kg = quantity
+        if unit_clean in ["g", "gs", "gram", "grams"]:
+            weight_kg = quantity / 1000.0
+            
+        if waste_key:
+            factor_info = WASTE_FACTORS[waste_key]
+            factor_val = factor_info["factor"]
+            source_val = factor_info["source"]
+            
+            formula_res = calculate_waste_co2(weight_kg, factor_val, source_val)
+            
+            metadata = {
+                "co2": formula_res["co2"],
+                "factor": formula_res["factor"],
+                "source": formula_res["source"],
+                "method": "formula",
+                # legacy keys:
+                "item_mapped": waste_key,
+                "quantity_input": quantity,
+                "unit_input": unit,
+                "quantity_calculated": round(weight_kg, 2),
+                "unit_calculated": "kg",
+                "emission_factor": factor_val
+            }
+            return formula_res["co2"], metadata
+
+    # ── Shopping Category ───────────────────────────────────────────────
+    if category_clean == "shopping":
+        shopping_key = None
+        if item_clean in SHOPPING_FACTORS:
+            shopping_key = item_clean
+        else:
+            for s in SHOPPING_FACTORS:
+                if s in item_clean or item_clean in s:
+                    shopping_key = s
+                    break
+                    
+        if shopping_key:
+            factor_info = SHOPPING_FACTORS[shopping_key]
+            factor_val = factor_info["factor"]
+            source_val = factor_info["source"]
+            
+            formula_res = calculate_shopping_co2(quantity, factor_val, source_val)
+            
+            metadata = {
+                "co2": formula_res["co2"],
+                "factor": formula_res["factor"],
+                "source": formula_res["source"],
+                "method": "formula",
+                # legacy keys:
+                "item_mapped": shopping_key,
+                "quantity_input": quantity,
+                "unit_input": unit,
+                "quantity_calculated": quantity,
+                "unit_calculated": "items",
+                "emission_factor": factor_val
+            }
+            return formula_res["co2"], metadata
     
     factor_record = get_factor_first(db, category=category_clean, item_key=item_clean, region=region)
     

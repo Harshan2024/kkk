@@ -17,3 +17,13 @@ def format_formula(distance: float, factor: float) -> str:
     # Format factor to 3 decimal places
     f_str = f"{factor:.3f}"
     return f"{d_str} \u00d7 {f_str}"
+
+def calculate_transport_co2(distance: float, factor: float, source: str) -> dict:
+    """Computes carbon emissions and returns unified formula output schema."""
+    co2 = calculate_emissions(distance, factor)
+    return {
+        "co2": co2,
+        "factor": factor,
+        "source": source,
+        "method": "formula"
+    }

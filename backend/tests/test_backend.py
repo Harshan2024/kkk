@@ -223,3 +223,51 @@ def test_forecast_fallback_and_generate():
     
     response_gen = client.get("/api/v1/analytics/forecast?username=test_user&generate=true")
     assert response_gen.status_code == 503
+
+def test_formula_engine_transport():
+    db = MockDbSession()
+    # Test transport formula calculation for electric train
+    emissions, meta = calculate_transport_emission(db, "electric train", 100.0, "km")
+    assert meta["method"] == "formula"
+    assert meta["factor"] == 0.020
+    assert meta["source"] == "DEFRA"
+    assert emissions == 2.0
+    
+def test_formula_engine_food():
+    db = MockDbSession()
+    # Test food formula calculation for beef (60.0 factor)
+    emissions, meta = calculate_food_emission(db, "beef", 2.0, "kg")
+    assert meta["method"] == "formula"
+    assert meta["factor"] == 60.0
+    assert meta["source"] == "Our World In Data"
+    assert emissions == 120.0
+
+def test_formula_engine_energy():
+    db = MockDbSession()
+    # Test appliance formula calculation for ac (1500W, region California factor 0.22)
+    # 1500 W * 2 hours / 1000 = 3 kWh. 3 kWh * 0.22 = 0.66 kg CO2
+    emissions, meta = calculate_appliance_emission(db, "ac", 2.0, region="California")
+    assert meta["method"] == "formula"
+    assert meta["factor"] == 0.22
+    assert meta["source"] == "CARB"
+    assert emissions == 0.66
+
+def test_formula_engine_waste():
+    from app.calculations.engines import calculate_generic_emission
+    db = MockDbSession()
+    # Test waste formula calculation for organic waste (0.5 factor)
+    emissions, meta = calculate_generic_emission(db, "waste", "organic waste", 10.0, "kg")
+    assert meta["method"] == "formula"
+    assert meta["factor"] == 0.5
+    assert meta["source"] == "EPA"
+    assert emissions == 5.0
+
+def test_formula_engine_shopping():
+    from app.calculations.engines import calculate_generic_emission
+    db = MockDbSession()
+    # Test shopping formula calculation for clothing (6.0 factor)
+    emissions, meta = calculate_generic_emission(db, "shopping", "clothing", 3.0, "items")
+    assert meta["method"] == "formula"
+    assert meta["factor"] == 6.0
+    assert meta["source"] == "UNEP"
+    assert emissions == 18.0
