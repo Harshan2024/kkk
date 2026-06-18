@@ -344,7 +344,7 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
                       CO₂ Output
                     </span>
                     <div className="text-xl font-black text-white font-sans">
-                      {parseResult.calculated_value.toFixed(1)} <span className="text-[10px] text-stone-500 uppercase">kg</span>
+                      {parseResult.calculated_value.toFixed(2)} <span className="text-[10px] text-stone-500 uppercase">kg</span>
                     </div>
                     {parseResult.parsed.category === "exercise" && (
                       <span className="mt-1.5 inline-block px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-bold">

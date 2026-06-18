@@ -222,11 +222,11 @@ def calculate_food_emission(db: Session, item: str, quantity: float, unit: str, 
         else:
             weight_kg = 0.200 * quantity
 
-    # Try matching using food_formula and FOOD_FACTORS
+    # ── PRIMARY: Master Emission Formula Standard (Section C) ──────────────
+    # FOOD_FACTORS holds approved per-serving dish factors.
+    # These always take priority over the ingredient-decomposition RECIPES path.
     food_key = None
-    if item_clean in RECIPES:
-        pass
-    elif item_clean in FOOD_FACTORS:
+    if item_clean in FOOD_FACTORS:
         food_key = item_clean
     else:
         for f in FOOD_FACTORS:
@@ -236,23 +236,30 @@ def calculate_food_emission(db: Session, item: str, quantity: float, unit: str, 
 
     if food_key:
         factor_info = FOOD_FACTORS[food_key]
-        factor_val = factor_info["factor"]
-        source_val = factor_info["source"]
-        
-        formula_res = calculate_food_co2(weight_kg, factor_val, source_val)
-        
+        factor_val  = factor_info["factor"]
+        source_val  = factor_info["source"]
+
+        # quantity is servings; formula: servings × factor
+        servings = max(quantity, 1.0) if unit_clean in [
+            "plate", "plates", "bowl", "bowls", "cup", "cups",
+            "glass", "glasses", "serving", "servings", "piece", "pieces"
+        ] else quantity
+
+        formula_res = calculate_food_co2(servings, factor_val, source_val)
+
         metadata = {
-            "co2": formula_res["co2"],
-            "factor": formula_res["factor"],
-            "source": formula_res["source"],
-            "method": "formula",
-            # legacy keys for backwards compatibility:
-            "calculation_type": "weight_based",
-            "mapped_item": food_key,
-            "estimated_weight_kg": round(weight_kg, 3),
-            "emission_factor": factor_val
+            "co2":     formula_res["co2"],
+            "factor":  formula_res["factor"],
+            "source":  formula_res["source"],
+            "method":  "formula",
+            # legacy compatibility keys
+            "calculation_type": "per_serving",
+            "mapped_item":      food_key,
+            "servings":         servings,
+            "emission_factor":  factor_val,
         }
         return formula_res["co2"], metadata
+
 
     # 1. Resolve composite recipe
     if item_clean in RECIPES:
@@ -565,10 +572,9 @@ def calculate_appliance_emission(db: Session, appliance: str, duration_hours: fl
     # Calculate kWh
     kwh = (watts * duration_hours * quantity) / 1000.0
     
-    # Retrieve electricity grid emission factor matching selected region
-    grid_record = get_factor_first(db, item_key="grid electricity", region=region)
-    grid_factor = grid_record.factor if grid_record else 0.70
-    grid_source = grid_record.source if grid_record else "estimated"
+    # MANDATORY grid factor = 0.82 kg CO2e/kWh (Master Emission Formula Standard)
+    grid_factor = 0.82
+    grid_source = "CarbonTracker Standard"
     
     emissions = kwh * grid_factor
     
@@ -606,16 +612,16 @@ def calculate_generic_emission(db: Session, category: str, item: str, quantity: 
         }
         return 0.0, metadata
 
-    if item_clean == "needs clarification":
+    if item_clean in ["needs clarification", "unknown"]:
         metadata = {
-            "item_mapped": "Needs Clarification",
+            "item_mapped": "Unknown",
             "quantity_input": quantity,
             "unit_input": unit,
             "quantity_calculated": quantity,
             "unit_calculated": unit,
             "emission_factor": 0.0,
             "source": "Calculated",
-            "method": "Needs Clarification"
+            "method": "Unknown"
         }
         return 0.0, metadata
 

@@ -24,8 +24,8 @@ def get_embedding(text: str) -> List[float]:
     try:
         return breakers["embeddings"].call(_get_embedding, text)
     except Exception:
-        # Return uniform vector if breaker is open or calculation fails
-        return [1.0 / math.sqrt(8.0)] * 8
+        # Return zero vector if breaker is open or calculation fails
+        return [0.0] * 8
 
 def _get_embedding(text: str) -> List[float]:
     """Internal implementation of concept vector generation."""
@@ -51,7 +51,7 @@ def _get_embedding(text: str) -> List[float]:
     except Exception:
         pass
         
-    return [1.0 / math.sqrt(8.0)] * 8
+    return [0.0] * 8
 
 
 def calculate_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:

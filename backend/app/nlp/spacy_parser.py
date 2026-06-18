@@ -30,6 +30,7 @@ LABEL_TO_CATEGORY = {
     # Appliances
     "air_conditioner": "appliances",
     "washing_machine": "appliances",
+    "laptop_charger": "appliances",
     # Food — all PhraseMatcher food labels must be listed here so that
     # the spaCy fast-path returns category='food' instead of 'lifestyle'
     "vegetarian_meal": "food",
@@ -40,6 +41,13 @@ LABEL_TO_CATEGORY = {
     "lemon_rice": "food",
     "paneer_rice": "food",
     "pongal": "food",
+    "chicken_biriyani": "food",
+    "mutton_biriyani": "food",
+    "sambar_rice": "food",
+    # Waste
+    "plastic_waste": "waste",
+    "battery_waste": "waste",
+    "e_waste": "waste",
 }
 
 DEFAULT_UNITS = {
@@ -145,6 +153,31 @@ def parse_spacy(text: str) -> Optional[Dict[str, Any]]:
     _shopping_co2 = None
     _wattage_result = None
     
+    canonical_items = {
+        "electric_train": "electric_train",
+        "electric_bus": "electric_bus",
+        "electric_scooter": "electric_scooter",
+        "electric_bike": "electric_bike",
+        "petrol_car": "petrol_car",
+        "diesel_car": "diesel_car",
+        "hybrid_car": "hybrid_car",
+        "cng_car": "cng_car",
+        "auto_rickshaw": "auto_rickshaw",
+        "domestic_flight": "domestic_flight",
+        "international_flight": "international_flight",
+        "electric_car": "electric_car",
+        "local_train": "local_train",
+        "air_conditioner": "air_conditioner",
+        "washing_machine": "washing_machine",
+        "laptop_charger": "laptop_charger",
+        "plastic_waste": "plastic_waste",
+        "battery_waste": "battery_waste",
+        "e_waste": "e_waste",
+    }
+    
+    if item in canonical_items:
+        item = canonical_items[item]
+        
     if category == "food":
         from app.nlp.food_emission_factors import lookup_food
         food_hit = lookup_food(matched_phrase) or lookup_food(item.replace("_", " "))
@@ -152,6 +185,16 @@ def parse_spacy(text: str) -> Optional[Dict[str, Any]]:
             if item != "vegetarian_meal":
                 item = food_hit["name"]
             _food_co2_kg = food_hit["co2_kg"]
+
+    # Extract wattage and duration robustly
+    if category == "appliances":
+        from app.nlp.intent_router import detect_wattage, compute_wattage_emission
+        watts = detect_wattage(normalized_text)
+        if watts is not None:
+            co2_val, meta = compute_wattage_emission(watts, duration)
+            _wattage_result = meta
+            quantity = duration
+            unit = "hours"
     
     # Feature 6: Date Context
     date_ctx = extract_date_context(normalized_text)

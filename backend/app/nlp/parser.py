@@ -39,6 +39,10 @@ KEYWORD_MAPPINGS = {
     "yogurt": ("food", "curd", "kg"),
     "biryani": ("food", "chicken biryani", "plate"),
     "chicken biryani": ("food", "chicken biryani", "plate"),
+    "chicken biriyani": ("food", "chicken biryani", "plate"),
+    "mutton biryani": ("food", "mutton biryani", "plate"),
+    "mutton biriyani": ("food", "mutton biryani", "plate"),
+    "sambar rice": ("food", "sambar rice", "plate"),
     "chicken": ("food", "chicken", "kg"),
     "beef": ("food", "beef", "kg"),
     "rice": ("food", "rice", "kg"),
@@ -69,6 +73,8 @@ KEYWORD_MAPPINGS = {
     "bike": ("transport", "bike", "km"),
     "motorcycle": ("transport", "bike", "km"),
     "scooter": ("transport", "bike", "km"),
+    "electric scooter": ("transport", "electric scooter", "km"),
+    "electric train": ("transport", "electric train", "km"),
     "bus": ("transport", "bus", "km"),
     "train": ("transport", "train", "km"),
     "metro": ("transport", "metro", "km"),
@@ -101,6 +107,7 @@ KEYWORD_MAPPINGS = {
     "fan": ("appliances", "fan", "hours"),
     "fridge": ("appliances", "refrigerator", "hours"),
     "refrigerator": ("appliances", "refrigerator", "hours"),
+    "laptop charger": ("appliances", "laptop charger", "hours"),
     "laptop": ("appliances", "laptop", "hours"),
     "computer": ("appliances", "laptop", "hours"),
     "macbook": ("appliances", "laptop", "hours"),
@@ -118,8 +125,12 @@ KEYWORD_MAPPINGS = {
     "organic waste": ("waste", "organic waste", "kg"),
     "food waste": ("waste", "organic waste", "kg"),
     "garbage": ("waste", "organic waste", "kg"),
+    "plastic waste": ("waste", "plastic waste", "kg"),
     "plastic": ("waste", "plastic waste", "kg"),
+    "paper waste": ("waste", "paper waste", "kg"),
     "paper": ("waste", "paper waste", "kg"),
+    "battery waste": ("waste", "battery waste", "kg"),
+    "e-waste": ("waste", "e-waste", "kg"),
     "recycling": ("waste", "recycling", "kg"),
     "recycled": ("waste", "recycling", "kg"),
     
@@ -139,6 +150,8 @@ KEYWORD_MAPPINGS = {
     "iphone": ("shopping", "electronics", "item"),
     "tablet": ("shopping", "electronics", "item"),
 }
+
+KEYWORD_MAPPINGS = dict(sorted(KEYWORD_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True))
 
 # Standard text numbers to float conversion
 TEXT_NUMBERS = {
@@ -269,6 +282,7 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
         VEHICLE_EMISSION_FACTORS,
     )
     from app.nlp.intent_engine import detect_intent as detect_intent_engine
+    from app.nlp.spacy_service import extract_duration as spacy_extract_duration
 
     cleaned = preprocess_text(text)
 
@@ -737,6 +751,14 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
     if category == "appliances":
         if unit in ["times", "twice", "time", "runs", "run"]:
             unit = "hours"
+        # Extract wattage and duration robustly
+        watts = detect_wattage(cleaned)
+        dur = spacy_extract_duration(cleaned) or (quantity if unit in ["hours", "times", "twice", "time", "runs", "run"] else 1.0)
+        if watts is not None:
+            co2_val, meta = compute_wattage_emission(watts, dur)
+            _wattage_result = meta
+            quantity = dur
+            unit = "hours"
 
     # ── Post-processing: Shower → water quantity ──────────────────────────
     if item == "tap water" and "shower" in cleaned:
@@ -768,10 +790,10 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # Step 8 low-confidence fallback to "Needs Clarification"
+    # Step 8 low-confidence fallback to "Unknown"
     if confidence < 0.50:
         category = "lifestyle"
-        item = "Needs Clarification"
+        item = "Unknown"
         quantity = 0.0
         unit = "unit"
         ambiguity = round(1.0 - confidence, 2)

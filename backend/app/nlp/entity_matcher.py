@@ -36,7 +36,14 @@ class EntityMatcher:
                 "paneer_rice": ["paneer rice"],
                 "dosa": ["dosa", "plain dosa", "paneer dosa", "masala dosa"],
                 "idli": ["idli", "idlis", "idly"],
-                "pongal": ["pongal"]
+                "pongal": ["pongal"],
+                "laptop_charger": ["laptop charger"],
+                "chicken_biriyani": ["chicken biriyani", "chicken biryani"],
+                "mutton_biriyani": ["mutton biriyani", "mutton biryani"],
+                "sambar_rice": ["sambar rice"],
+                "plastic_waste": ["plastic waste"],
+                "battery_waste": ["battery waste"],
+                "e_waste": ["e-waste", "ewaste"]
             }
             for label, terms in self.patterns.items():
                 pattern_docs = [self.nlp.make_doc(text) for text in terms]

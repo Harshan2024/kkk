@@ -183,8 +183,12 @@ def calculate_emissions(db: Session, parsed: dict, region: str = "Global") -> tu
         if category == "transport":
             return calculate_transport_emission(db, item, quantity, unit, region=region)
         elif category in ("appliances", "electricity"):
-            duration = quantity if unit == "hours" else 1.0
-            qty      = 1.0 if unit == "hours" else quantity
+            duration = parsed.get("duration")
+            if duration is None:
+                duration = quantity if unit == "hours" else 1.0
+            qty = 1.0 if unit == "hours" else quantity
+            if unit in ["w", "W", "kw", "kW", "watts", "watt"]:
+                qty = 1.0
             return calculate_appliance_emission(db, item, duration, qty, region=region)
         else:
             return calculate_generic_emission(db, category, item, quantity, unit, region=region)

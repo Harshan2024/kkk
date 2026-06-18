@@ -141,22 +141,23 @@ def test_nlp_parser_basic():
 def test_food_calculations(monkeypatch):
     """
     Tests food calculation engine.
+    Updated for Master Emission Formula Standard — curd rice now uses the
+    approved per-serving factor (0.40 kg CO2e/serving) from food_factors.py.
     """
     db = MockDbSession()
     monkeypatch.setattr(db, "query", lambda model: MockQuery(db, model))
 
-    # Test recipe curd rice: 200g rice (2.7 CO2e/kg) + 150g curd (2.2 CO2e/kg)
-    # Emissions = (0.2 * 2.7) + (0.15 * 2.2) = 0.54 + 0.33 = 0.87 kgCO2e
+    # Curd rice: matched via FOOD_FACTORS (per-serving factor = 0.40)
+    # Formula: 1 serving × 0.40 = 0.40 kg CO2e
     emissions, meta = calculate_food_emission(db, "curd rice", 1.0, "plate")
-    assert abs(emissions - 0.87) < 0.01
-    assert meta["calculation_type"] == "recipe_based"
+    assert abs(emissions - 0.40) < 0.01
+    assert meta["method"] == "formula"
 
-    # Test weight based item: chicken 500g
-    # Chicken: 6.9 kgCO2e/kg. Weight = 0.5kg.
-    # Emissions = 0.5 * 6.9 = 3.45 kgCO2e
-    emissions, meta = calculate_food_emission(db, "chicken", 500, "g")
-    assert abs(emissions - 3.45) < 0.01
-    assert meta["estimated_weight_kg"] == 0.5
+    # Chicken biryani: per-serving factor = 2.50
+    # Formula: 1 serving × 2.50 = 2.50 kg CO2e
+    emissions, meta = calculate_food_emission(db, "chicken biryani", 1.0, "plate")
+    assert abs(emissions - 2.50) < 0.01
+    assert meta["method"] == "formula"
 
 def test_transport_calculations(monkeypatch):
     """
@@ -196,15 +197,17 @@ def test_transport_calculations(monkeypatch):
 def test_appliance_calculations(monkeypatch):
     """
     Tests appliance calculation engine.
+    Updated for Master Emission Formula Standard — mandatory grid factor = 0.82.
+    Formula: (Watts / 1000) × Hours × 0.82
     """
     db = MockDbSession()
     monkeypatch.setattr(db, "query", lambda model: MockQuery(db, model))
 
-    # Test AC (1500W) for 5 hours. Grid factor (0.70)
+    # Test AC (1500W) for 5 hours. Grid factor (0.82)
     # Power = (1500 * 5) / 1000 = 7.5 kWh
-    # Emissions = 7.5 * 0.70 = 5.25 kgCO2e
+    # Emissions = 7.5 * 0.82 = 6.15 kgCO2e
     emissions, meta = calculate_appliance_emission(db, "ac", 5.0)
-    assert abs(emissions - 5.25) < 0.01
+    assert abs(emissions - 6.15) < 0.01
     assert meta["total_kwh"] == 7.5
 
 def test_forecast_fallback_and_generate():
@@ -226,48 +229,50 @@ def test_forecast_fallback_and_generate():
 
 def test_formula_engine_transport():
     db = MockDbSession()
-    # Test transport formula calculation for electric train
+    # Electric train: factor = 0.020, 100 km × 0.020 = 2.0 kg CO2e
     emissions, meta = calculate_transport_emission(db, "electric train", 100.0, "km")
     assert meta["method"] == "formula"
     assert meta["factor"] == 0.020
-    assert meta["source"] == "DEFRA"
+    assert meta["source"] == "CarbonTracker Standard"
     assert emissions == 2.0
-    
+
 def test_formula_engine_food():
     db = MockDbSession()
-    # Test food formula calculation for beef (60.0 factor)
-    emissions, meta = calculate_food_emission(db, "beef", 2.0, "kg")
+    # Chicken biryani: approved per-serving factor = 2.50
+    # Formula: 1 serving × 2.50 = 2.50 kg CO2e
+    emissions, meta = calculate_food_emission(db, "chicken biryani", 1.0, "plate")
     assert meta["method"] == "formula"
-    assert meta["factor"] == 60.0
-    assert meta["source"] == "Our World In Data"
-    assert emissions == 120.0
+    assert meta["factor"] == 2.50
+    assert meta["source"] == "CarbonTracker Standard"
+    assert abs(emissions - 2.50) < 0.01
 
 def test_formula_engine_energy():
     db = MockDbSession()
-    # Test appliance formula calculation for ac (1500W, region California factor 0.22)
-    # 1500 W * 2 hours / 1000 = 3 kWh. 3 kWh * 0.22 = 0.66 kg CO2
-    emissions, meta = calculate_appliance_emission(db, "ac", 2.0, region="California")
+    # AC (1500W) for 2 hours. Mandatory grid factor = 0.82
+    # Energy = (1500/1000) × 2 = 3.0 kWh
+    # CO2   = 3.0 × 0.82 = 2.46 kg
+    emissions, meta = calculate_appliance_emission(db, "ac", 2.0)
     assert meta["method"] == "formula"
-    assert meta["factor"] == 0.22
-    assert meta["source"] == "CARB"
-    assert emissions == 0.66
+    assert meta["factor"] == 0.82
+    assert meta["source"] == "CarbonTracker Standard"
+    assert abs(emissions - 2.46) < 0.01
 
 def test_formula_engine_waste():
     from app.calculations.engines import calculate_generic_emission
     db = MockDbSession()
-    # Test waste formula calculation for organic waste (0.5 factor)
+    # Organic waste: approved factor = 0.5, 10 kg × 0.5 = 5.0 kg CO2e
     emissions, meta = calculate_generic_emission(db, "waste", "organic waste", 10.0, "kg")
     assert meta["method"] == "formula"
     assert meta["factor"] == 0.5
-    assert meta["source"] == "EPA"
+    assert meta["source"] == "CarbonTracker Standard"
     assert emissions == 5.0
 
 def test_formula_engine_shopping():
     from app.calculations.engines import calculate_generic_emission
     db = MockDbSession()
-    # Test shopping formula calculation for clothing (6.0 factor)
+    # Clothing: approved factor = 6.0, 3 items × 6.0 = 18.0 kg CO2e
     emissions, meta = calculate_generic_emission(db, "shopping", "clothing", 3.0, "items")
     assert meta["method"] == "formula"
     assert meta["factor"] == 6.0
-    assert meta["source"] == "UNEP"
+    assert meta["source"] == "CarbonTracker Standard"
     assert emissions == 18.0

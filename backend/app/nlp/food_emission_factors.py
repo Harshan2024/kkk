@@ -33,19 +33,19 @@ _RAW: list[dict] = [
     {
         "name": "Idly",
         "keywords": ["idly", "idli", "idlis"],
-        "co2_kg": 0.40,
+        "co2_kg": 0.12,
         "unit": "plate",
     },
     {
         "name": "Masala Dosa",
         "keywords": ["masala dosa"],
-        "co2_kg": 0.80,
+        "co2_kg": 0.18,
         "unit": "plate",
     },
     {
         "name": "dosa",
         "keywords": ["plain dosa", "paneer dosa", "dosa"],
-        "co2_kg": 0.60,
+        "co2_kg": 0.18,
         "unit": "plate",
     },
     {
@@ -57,7 +57,7 @@ _RAW: list[dict] = [
     {
         "name": "Sambar Rice",
         "keywords": ["sambar rice", "sambar sadam"],
-        "co2_kg": 1.00,
+        "co2_kg": 0.45,
         "unit": "plate",
     },
     {
@@ -75,7 +75,7 @@ _RAW: list[dict] = [
     {
         "name": "Curd Rice",
         "keywords": ["curd rice"],
-        "co2_kg": 0.90,
+        "co2_kg": 0.40,
         "unit": "plate",
     },
     {
@@ -93,13 +93,13 @@ _RAW: list[dict] = [
     {
         "name": "Veg Fried Rice",
         "keywords": ["veg fried rice", "veg rice"],
-        "co2_kg": 1.50,
+        "co2_kg": 0.60,
         "unit": "plate",
     },
     {
         "name": "Veg Noodles",
         "keywords": ["vegetable noodles", "veg noodles"],
-        "co2_kg": 1.60,
+        "co2_kg": 0.50,
         "unit": "plate",
     },
     {
@@ -119,25 +119,25 @@ _RAW: list[dict] = [
     {
         "name": "Chicken Biriyani",
         "keywords": ["chicken biriyani", "chicken biryani", "chicken briyani"],
-        "co2_kg": 2.80,
+        "co2_kg": 2.50,
         "unit": "plate",
     },
     {
         "name": "Chicken Fried Rice",
         "keywords": ["chicken fried rice"],
-        "co2_kg": 2.70,
+        "co2_kg": 1.60,
         "unit": "plate",
     },
     {
         "name": "Chicken Noodles",
         "keywords": ["chicken noodles"],
-        "co2_kg": 2.60,
+        "co2_kg": 1.70,
         "unit": "plate",
     },
     {
         "name": "Chicken Rice",
         "keywords": ["chicken rice"],
-        "co2_kg": 2.50,
+        "co2_kg": 1.60,
         "unit": "plate",
     },
     {
@@ -163,7 +163,7 @@ _RAW: list[dict] = [
     {
         "name": "Mutton Biriyani",
         "keywords": ["mutton biriyani", "mutton biryani", "mutton briyani"],
-        "co2_kg": 5.80,
+        "co2_kg": 3.50,
         "unit": "plate",
     },
     {
@@ -175,7 +175,7 @@ _RAW: list[dict] = [
     {
         "name": "Mutton Rice",
         "keywords": ["mutton rice"],
-        "co2_kg": 5.20,
+        "co2_kg": 3.00,
         "unit": "plate",
     },
 
@@ -183,7 +183,7 @@ _RAW: list[dict] = [
     {
         "name": "Egg Noodles",
         "keywords": ["egg noodles"],
-        "co2_kg": 1.90,
+        "co2_kg": 0.85,
         "unit": "plate",
     },
     {
@@ -323,13 +323,13 @@ _RAW: list[dict] = [
     {
         "name": "Coffee",
         "keywords": ["coffee", "cappuccino", "latte", "espresso"],
-        "co2_kg": 0.30,
+        "co2_kg": 0.08,
         "unit": "cup",
     },
     {
         "name": "Tea",
         "keywords": ["tea", "chai"],
-        "co2_kg": 0.20,
+        "co2_kg": 0.05,
         "unit": "cup",
     },
     {

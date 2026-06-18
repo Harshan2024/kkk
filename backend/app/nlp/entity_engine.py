@@ -76,7 +76,14 @@ def normalize_units_in_text(text: str) -> str:
     def replace_minutes(match):
         val = float(match.group(1))
         hours = val / 60.0
-        hours_str = f"{int(hours)}" if hours.is_integer() else f"{hours:.2f}"
+        # Use the shortest unambiguous decimal representation so the
+        # downstream parser always receives a single cleanly-tokenised number.
+        # "1.50 hours" can be mis-read as quantity=1; "1.5 hours" is safe.
+        if hours.is_integer():
+            hours_str = str(int(hours))
+        else:
+            # Strip trailing zeros: 1.500000 → 1.5, 0.250000 → 0.25
+            hours_str = f"{hours:.10f}".rstrip('0').rstrip('.')
         return f"{hours_str} hours"
     
     text = re.sub(r'\b(\d+(?:\.\d+)?)\s*(?:minutes|minute|mins|min)\b', replace_minutes, text, flags=re.IGNORECASE)
@@ -199,11 +206,45 @@ def extract_entities(text: str, intent: Optional[str] = None) -> dict:
     
     # Specific Feature Overrides for mapping correctness (Feature 10 safety)
     direct_checks = {
-        "food": [("idli", "idli"), ("idlis", "idli"), ("idly", "idli"), ("dosa", "dosa")],
-        "energy": [("ac", "air_conditioner"), ("air conditioner", "air_conditioner"), ("tv", "television"), ("television", "television")],
-        "shopping": [("laptop", "laptop"), ("mobile phone", "smartphone"), ("smartphone", "smartphone"), ("phone", "smartphone")],
-        "waste": [("plastic waste", "plastic_waste"), ("paper waste", "paper_waste"), ("organic waste", "organic_waste")],
-        "transport": [("electric train", "electric_train"), ("electric bus", "electric_bus"), ("electric scooter", "electric_scooter"), ("electric bike", "electric_bike"), ("petrol car", "petrol_car"), ("diesel car", "diesel_car")]
+        "food": [
+            ("chicken biriyani", "chicken_biriyani"),
+            ("chicken biryani", "chicken_biriyani"),
+            ("mutton biriyani", "mutton_biriyani"),
+            ("mutton biryani", "mutton_biriyani"),
+            ("sambar rice", "sambar_rice"),
+            ("idli", "idli"),
+            ("idlis", "idli"),
+            ("idly", "idli"),
+            ("dosa", "dosa")
+        ],
+        "energy": [
+            ("laptop charger", "laptop_charger"),
+            ("ac", "air_conditioner"),
+            ("air conditioner", "air_conditioner"),
+            ("tv", "television"),
+            ("television", "television")
+        ],
+        "shopping": [
+            ("laptop", "laptop"),
+            ("mobile phone", "smartphone"),
+            ("smartphone", "smartphone"),
+            ("phone", "smartphone")
+        ],
+        "waste": [
+            ("plastic waste", "plastic_waste"),
+            ("paper waste", "paper_waste"),
+            ("battery waste", "battery_waste"),
+            ("e-waste", "e_waste"),
+            ("organic waste", "organic_waste")
+        ],
+        "transport": [
+            ("electric train", "electric_train"),
+            ("electric bus", "electric_bus"),
+            ("electric scooter", "electric_scooter"),
+            ("electric bike", "electric_bike"),
+            ("petrol car", "petrol_car"),
+            ("diesel car", "diesel_car")
+        ]
     }
     
     matched_canonical = None
