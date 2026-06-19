@@ -43,7 +43,8 @@ class EntityMatcher:
                 "sambar_rice": ["sambar rice"],
                 "plastic_waste": ["plastic waste"],
                 "battery_waste": ["battery waste"],
-                "e_waste": ["e-waste", "ewaste"]
+                "e_waste": ["e-waste", "ewaste"],
+                "cricket": ["cricket", "played cricket", "play cricket", "playing cricket"]
             }
             for label, terms in self.patterns.items():
                 pattern_docs = [self.nlp.make_doc(text) for text in terms]

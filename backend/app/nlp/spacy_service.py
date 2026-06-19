@@ -2,27 +2,23 @@ import spacy
 from typing import List, Dict, Any, Tuple
 import re
 
-# Lazy-loaded singleton pattern
-_nlp = None
-_spacy_loaded = False
+# Pre-load spaCy model once at module startup
+try:
+    _nlp = spacy.load("en_core_web_sm")
+except OSError:
+    try:
+        from spacy.cli import download
+        download("en_core_web_sm")
+        _nlp = spacy.load("en_core_web_sm")
+    except Exception:
+        _nlp = None
+except Exception:
+    _nlp = None
 
 def get_spacy_nlp():
     """
     Returns the loaded en_core_web_sm spaCy model.
-    Loads it only once.
     """
-    global _nlp, _spacy_loaded
-    if not _spacy_loaded:
-        try:
-            try:
-                _nlp = spacy.load("en_core_web_sm")
-            except OSError:
-                from spacy.cli import download
-                download("en_core_web_sm")
-                _nlp = spacy.load("en_core_web_sm")
-        except Exception:
-            _nlp = None
-        _spacy_loaded = True
     return _nlp
 
 # Textual numbers mapping

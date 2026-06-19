@@ -30,18 +30,16 @@ def get_embedding(text: str) -> List[float]:
 def _get_embedding(text: str) -> List[float]:
     """Internal implementation of concept vector generation."""
     try:
+        import re
         text_clean = text.lower().strip()
         vector = [0.0] * 8
         
         for idx, keywords in enumerate(CONCEPT_KEYWORDS):
             score = 0.0
             for kw in keywords:
-                if kw in text_clean:
-                    # Give higher weight to exact boundary matches
-                    if f" {kw} " in f" {text_clean} ":
-                        score += 1.0
-                    else:
-                        score += 0.4
+                # Use regex word boundaries to check for full concept words
+                if re.search(r'\b' + re.escape(kw) + r'\b', text_clean):
+                    score += 1.0
             vector[idx] = score
             
         # Normalize vector to unit length

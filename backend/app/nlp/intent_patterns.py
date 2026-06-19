@@ -89,6 +89,13 @@ EXERCISE_PATTERNS: dict[str, int] = {
     "crossfit":         5,
     "calisthenics":     5,
     "fitness":          5,
+    "cricket":          5,
+    "played cricket":   5,
+    "play cricket":     5,
+    "playing cricket":  5,
+    "play":             2,
+    "played":           2,
+    "playing":          2,
     # Compound phrases (3)
     "bicycle ride":     3,
     "morning walk":     3,

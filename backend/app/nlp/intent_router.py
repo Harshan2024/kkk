@@ -371,8 +371,19 @@ def detect_vehicle(text: str) -> str:
         ("auto",           "auto"),
         ("walk",           "walking"),
         ("bicycle",        "cycling"),
+        ("drove",          "petrol car"),
+        ("drive",          "petrol car"),
+        ("driving",        "petrol car"),
+        ("commuted",       "petrol car"),
+        ("commute",        "petrol car"),
+        ("flew",           "flight"),
+        ("fly",            "flight"),
+        ("flying",         "flight"),
+        ("rode",           "bike"),
+        ("ride",           "bike"),
+        ("riding",         "bike"),
     ]
     for keyword, canonical in checks:
         if keyword in text_lower:
             return canonical
-    return "petrol car"  # default
+    return "unknown_transport_mode"  # default

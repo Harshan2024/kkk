@@ -149,6 +149,7 @@ KEYWORD_MAPPINGS = {
     "smartphone": ("shopping", "electronics", "item"),
     "iphone": ("shopping", "electronics", "item"),
     "tablet": ("shopping", "electronics", "item"),
+    "cricket": ("exercise", "cricket", "hours"),
 }
 
 KEYWORD_MAPPINGS = dict(sorted(KEYWORD_MAPPINGS.items(), key=lambda x: len(x[0]), reverse=True))
@@ -207,6 +208,10 @@ EXERCISE_HARD_BLOCK: frozenset = frozenset({
     "evening walk",
     "morning run",
     "worked out",
+    "cricket",
+    "play cricket",
+    "played cricket",
+    "playing cricket",
 })
 
 def _has_exercise_keyword(text: str) -> str | None:
@@ -882,7 +887,7 @@ def parse_compound_activity(text: str) -> List[Dict[str, Any]]:
     # partial matches (e.g. "and also" must be tried before bare "and").
     # Uses lookarounds to avoid splitting thousands separator commas like 1,000.
     parts = re.split(
-        r'\s+and\s+also\s+|\s+as\s+well\s+as\s+|\s+along\s+with\s+|\s+then\s+|\s+plus\s+|\s+and\s+|(?<!\d),\s*|,\s*(?!\d)',
+        r'\s+and\s+also\s+|\s+after\s+that\s+|\s+as\s+well\s+as\s+|\s+along\s+with\s+|\s+then\s+|\s+also\s+|\s+plus\s+|\s+and\s+|(?<!\d),\s*|,\s*(?!\d)|\s*\n\s*',
         text,
         flags=re.IGNORECASE
     )

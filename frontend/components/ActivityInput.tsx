@@ -61,10 +61,10 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
     e.preventDefault();
     if (!inputText.trim() || logging) return;
 
-    if (parseResult) {
+    if (parseResult && parseResult.parsed) {
       setLoggedImpact({
-        value: parseResult.calculated_value,
-        item: parseResult.parsed.item
+        value: parseResult?.calculated_value ?? 0.0,
+        item: parseResult?.parsed?.item ?? "Unknown"
       });
       setTimeout(() => setLoggedImpact(null), 10000);
     }
@@ -284,83 +284,93 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
             </div>
 
             {parseResult ? (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                {/* Parsed Entities */}
-                <div className="space-y-1.5 font-bold text-xs">
-                  <span className="text-[9px] uppercase font-black tracking-widest text-stone-500">
-                    Entities
+              !parseResult.parsed || (parseResult as any).error ? (
+                <div className="flex items-center space-x-2 text-rose-500 text-xs font-bold bg-rose-500/10 border border-rose-500/20 p-3.5 rounded-xl w-full">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
+                  <span>
+                    Unable to parse activity
+                    {(parseResult as any).error ? `: ${String((parseResult as any).error).replace(/_/g, ' ')}` : ""}
                   </span>
-                  <div className="space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-stone-500">Activity:</span>
-                      <span className="text-white capitalize truncate max-w-[100px]">{parseResult.parsed.item}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-stone-500">Category:</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] border capitalize leading-none font-bold ${getCategoryColor(parseResult.parsed.category)}`}>
-                        {parseResult.parsed.category}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-stone-500">Confidence:</span>
-                      <span className={parseResult.parsed.confidence >= 0.85 ? 'text-emerald-450' : 'text-amber-500'}>
-                        {(parseResult.parsed.confidence * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                  </div>
                 </div>
-
-                {/* Scientific Conversions */}
-                <div className="space-y-1.5 font-bold text-xs">
-                  <span className="text-[9px] uppercase font-black tracking-widest text-stone-500">
-                    Metrics
-                  </span>
-                  <div className="space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-stone-500">Quantity:</span>
-                      <span className="text-white">{parseResult.parsed.quantity} {parseResult.parsed.unit}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-stone-500">Factor:</span>
-                      <span className="text-stone-400 truncate max-w-[90px]">
-                        {parseResult.metadata.emission_factor !== undefined 
-                          ? `${parseResult.metadata.emission_factor} kg` 
-                          : "dynamic"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-stone-500">Method:</span>
-                      <span className="text-stone-400 truncate max-w-[90px] capitalize">
-                        {parseResult.metadata.calculation_type?.replace("_", " ") || "standard"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Emissions Result Box */}
-                <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/10 p-3 flex flex-col justify-between items-center text-center">
-                  <div>
-                    <span className="text-[9px] text-emerald-400 font-extrabold uppercase tracking-widest block mb-0.5">
-                      CO₂ Output
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  {/* Parsed Entities */}
+                  <div className="space-y-1.5 font-bold text-xs">
+                    <span className="text-[9px] uppercase font-black tracking-widest text-stone-500">
+                      Entities
                     </span>
-                    <div className="text-xl font-black text-white font-sans">
-                      {parseResult.calculated_value.toFixed(2)} <span className="text-[10px] text-stone-500 uppercase">kg</span>
+                    <div className="space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">Activity:</span>
+                        <span className="text-white capitalize truncate max-w-[100px]">{parseResult?.parsed?.item ?? "Unknown"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">Category:</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] border capitalize leading-none font-bold ${getCategoryColor(parseResult?.parsed?.category)}`}>
+                          {parseResult?.parsed?.category ?? "Unknown"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">Confidence:</span>
+                        <span className={(parseResult?.parsed?.confidence ?? 0) >= 0.85 ? 'text-emerald-450' : 'text-amber-500'}>
+                          {((parseResult?.parsed?.confidence ?? 0) * 100).toFixed(0)}%
+                        </span>
+                      </div>
                     </div>
-                    {parseResult.parsed.category === "exercise" && (
-                      <span className="mt-1.5 inline-block px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-bold">
-                        🌱 Eco-Friendly Activity
-                      </span>
-                    )}
                   </div>
-                  <button
-                    onClick={handleSubmit}
-                    disabled={logging}
-                    className="mt-2 w-full py-1.5 bg-emerald-500 hover:bg-emerald-450 text-[#080d0a] rounded-lg text-[10px] font-black uppercase transition-all tracking-wider active:scale-95 cursor-pointer shadow shadow-emerald-500/10"
-                  >
-                    Log to History
-                  </button>
+
+                  {/* Scientific Conversions */}
+                  <div className="space-y-1.5 font-bold text-xs">
+                    <span className="text-[9px] uppercase font-black tracking-widest text-stone-500">
+                      Metrics
+                    </span>
+                    <div className="space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">Quantity:</span>
+                        <span className="text-white">{parseResult?.parsed?.quantity ?? 1.0} {parseResult?.parsed?.unit ?? "unit"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">Factor:</span>
+                        <span className="text-stone-400 truncate max-w-[90px]">
+                          {parseResult?.metadata?.emission_factor !== undefined 
+                            ? `${parseResult?.metadata?.emission_factor} kg` 
+                            : ((parseResult?.parsed as any)?.factor !== undefined ? `${(parseResult?.parsed as any)?.factor} kg` : "dynamic")}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-stone-500">Method:</span>
+                        <span className="text-stone-400 truncate max-w-[90px] capitalize">
+                          {parseResult?.metadata?.calculation_type?.replace("_", " ") || (parseResult?.parsed as any)?.method?.replace("_", " ") || "standard"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Emissions Result Box */}
+                  <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/10 p-3 flex flex-col justify-between items-center text-center">
+                    <div>
+                      <span className="text-[9px] text-emerald-400 font-extrabold uppercase tracking-widest block mb-0.5">
+                        CO₂ Output
+                      </span>
+                      <div className="text-xl font-black text-white font-sans">
+                        {(parseResult?.calculated_value ?? 0.0).toFixed(2)} <span className="text-[10px] text-stone-500 uppercase">kg</span>
+                      </div>
+                      {parseResult?.parsed?.category === "exercise" && (
+                        <span className="mt-1.5 inline-block px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-bold">
+                          🌱 Eco-Friendly Activity
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={handleSubmit}
+                      disabled={logging}
+                      className="mt-2 w-full py-1.5 bg-emerald-500 hover:bg-emerald-450 text-[#080d0a] rounded-lg text-[10px] font-black uppercase transition-all tracking-wider active:scale-95 cursor-pointer shadow shadow-emerald-500/10"
+                    >
+                      Log to History
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )
             ) : (
               <div className="flex items-center space-x-2 text-stone-500 text-xs font-bold">
                 <Info className="w-3.5 h-3.5 text-stone-605" />

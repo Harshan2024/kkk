@@ -206,6 +206,9 @@ def extract_entities(text: str, intent: Optional[str] = None) -> dict:
     
     # Specific Feature Overrides for mapping correctness (Feature 10 safety)
     direct_checks = {
+        "exercise": [
+            ("cricket", "cricket")
+        ],
         "food": [
             ("chicken biriyani", "chicken_biriyani"),
             ("chicken biryani", "chicken_biriyani"),
@@ -421,7 +424,7 @@ def extract_multi_entities(text: str) -> list[dict]:
     """
     cleaned = normalize_units_in_text(text)
     
-    splitter_pattern = r'\s+and\s+also\s+|\s+as\s+well\s+as\s+|\s+along\s+with\s+|\s+then\s+|\s+plus\s+|\s+and\s+|(?<!\d),\s*|,\s*(?!\d)'
+    splitter_pattern = r'\s+and\s+also\s+|\s+after\s+that\s+|\s+as\s+well\s+as\s+|\s+along\s+with\s+|\s+then\s+|\s+also\s+|\s+plus\s+|\s+and\s+|(?<!\d),\s*|,\s*(?!\d)|\s*\n\s*'
     segments = re.split(splitter_pattern, cleaned, flags=re.IGNORECASE)
     
     results = []

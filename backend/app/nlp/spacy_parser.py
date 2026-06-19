@@ -48,13 +48,15 @@ LABEL_TO_CATEGORY = {
     "plastic_waste": "waste",
     "battery_waste": "waste",
     "e_waste": "waste",
+    "cricket": "exercise",
 }
 
 DEFAULT_UNITS = {
     "transport": "km",
     "appliances": "hours",
     "food": "plate",
-    "lifestyle": "item"
+    "lifestyle": "item",
+    "exercise": "hours"
 }
 
 def parse_spacy(text: str) -> Optional[Dict[str, Any]]:

@@ -41,24 +41,39 @@ def get_factor_first(db: Session, category: str = None, item_key: str = None, re
         return _FACTOR_CACHE[cache_key]
         
     record = None
-    try:
-        query = db.query(EmissionFactor)
-        if category:
-            query = query.filter(EmissionFactor.category == category)
-        if item_key:
-            query = query.filter(EmissionFactor.item_key == item_key)
-            
-        # 1. Try matching the requested region
-        record = query.filter(EmissionFactor.region == region).first()
-        if not record:
-            # 2. Fall back to Global region
-            record = query.filter(EmissionFactor.region == "Global").first()
-        if not record:
-            # 3. Last resort fallback to any first match
-            record = query.first()
-            
-    except Exception as e:
-        record = None
+    
+    # Check if item_key is obviously unknown to avoid querying/timeout
+    item_key_clean = item_key.lower().strip() if item_key else ""
+    if not item_key or "unknown" in item_key_clean or item_key_clean == "general activity":
+        _FACTOR_CACHE[cache_key] = None
+        return None
+
+    # Check if database is offline or degraded
+    from app.database import session as db_session
+    from app.database.session import check_database_health_throttled
+    
+    if db_session.OFFLINE_MODE or db_session.READ_ONLY_MODE or not check_database_health_throttled():
+        # Bypass DB query entirely
+        pass
+    else:
+        try:
+            query = db.query(EmissionFactor)
+            if category:
+                query = query.filter(EmissionFactor.category == category)
+            if item_key:
+                query = query.filter(EmissionFactor.item_key == item_key)
+                
+            # 1. Try matching the requested region
+            record = query.filter(EmissionFactor.region == region).first()
+            if not record:
+                # 2. Fall back to Global region
+                record = query.filter(EmissionFactor.region == "Global").first()
+            if not record:
+                # 3. Last resort fallback to any first match
+                record = query.first()
+                
+        except Exception as e:
+            record = None
 
     if record:
         cached = CachedEmissionFactor(
@@ -109,13 +124,22 @@ def get_factors_all(db: Session, category: str = None) -> list:
         return _ALL_FACTORS_CACHE[category]
         
     records = []
-    try:
-        query = db.query(EmissionFactor)
-        if category:
-            query = query.filter(EmissionFactor.category == category)
-        records = query.all()
-    except Exception as e:
-        records = []
+    
+    # Check if database is offline or degraded
+    from app.database import session as db_session
+    from app.database.session import check_database_health_throttled
+    
+    if db_session.OFFLINE_MODE or db_session.READ_ONLY_MODE or not check_database_health_throttled():
+        # Bypass DB query entirely
+        pass
+    else:
+        try:
+            query = db.query(EmissionFactor)
+            if category:
+                query = query.filter(EmissionFactor.category == category)
+            records = query.all()
+        except Exception as e:
+            records = []
         
     if records:
         results = []
@@ -446,10 +470,13 @@ def calculate_transport_emission(db: Session, vehicle: str, distance: float, uni
             factor_record = get_factor_first(db, category="transport", item_key="walking", region=region)
             
     if not factor_record:
-        factor_record = get_factor_first(db, category="transport", item_key="petrol car", region=region)
-        
-    factor_val = factor_record.factor if factor_record else 0.192
-    vehicle_mapped = factor_record.item_key if factor_record else "petrol car"
+        factor_val = 0.0
+        vehicle_mapped = "unknown_transport_mode"
+        source_val = "CarbonTracker Standard"
+    else:
+        factor_val = factor_record.factor
+        vehicle_mapped = factor_record.item_key
+        source_val = factor_record.source
     
     # Print debug logging output
     print(f"Detected Entity:\n{vehicle}")
