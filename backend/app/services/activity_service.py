@@ -190,8 +190,60 @@ def calculate_emissions(db: Session, parsed: dict, region: str = "Global") -> tu
             if unit in ["w", "W", "kw", "kW", "watts", "watt"]:
                 qty = 1.0
             return calculate_appliance_emission(db, item, duration, qty, region=region)
+        elif category == "waste":
+            # ── Phase C4 Waste Carbon Engine ──────────────────────────────────
+            # Route ALL waste intents through waste_carbon_engine which uses
+            # approved waste_factors.py (e.g. e-waste=12.0, plastic=6.0).
+            # Never fall through to calculate_generic_emission for waste.
+            try:
+                from app.carbon.waste_factors import lookup_waste_from_text, WASTE_FACTORS
+                from app.carbon.waste_formula import calculate_waste_carbon, format_waste_formula
+
+                # 1. Build lookup text from item name (which came from parser KEYWORD_MAPPINGS)
+                item_lower = str(item).lower().replace("_", " ").strip()
+
+                # 2. Resolve canonical waste key
+                #    Direct dict lookup first (fastest path), then text search
+                factor = WASTE_FACTORS.get(item_lower)
+                display_name = item_lower.title()
+
+                if factor is None:
+                    # Try full-text lookup (handles aliases like "electronic waste")
+                    match = lookup_waste_from_text(item_lower)
+                    if match:
+                        factor = match["factor"]
+                        display_name = match["display_name"]
+                    else:
+                        # Last resort: fall back to generic so we don't crash
+                        return calculate_generic_emission(db, category, item, quantity, unit, region=region)
+
+                # 3. Resolve weight in kg
+                weight_kg = float(quantity) if quantity else 1.0
+                if unit in ("g", "gram", "grams"):
+                    weight_kg = weight_kg / 1000.0
+
+                # 4. Calculate
+                carbon = calculate_waste_carbon(weight_kg, factor)
+                formula = format_waste_formula(weight_kg, factor)
+
+                return carbon, {
+                    "calculation_type": "waste_carbon_engine",
+                    "waste_type":       display_name,
+                    "weight_kg":        weight_kg,
+                    "factor":           factor,
+                    "emission_factor":  factor,       # UI reads metadata.emission_factor for Factor display
+                    "formula":          formula,
+                    "total_emissions_kg": carbon,
+                    "source":           "CarbonTracker Standard",
+                    "item_display":     display_name, # UI Activity label override
+                }
+            except Exception as e:
+                # Safety net — fall to generic if engine fails
+                log_structured("ERROR", "activity_service", f"waste_carbon_engine failed for item='{item}': {e}", {"item": item}, e)
+                return calculate_generic_emission(db, category, item, quantity, unit, region=region)
         else:
             return calculate_generic_emission(db, category, item, quantity, unit, region=region)
+
 
     except Exception as e:
         log_structured("ERROR", "activity_service", f"calculate_emissions failed for category='{parsed.get('category')}' item='{parsed.get('item')}': {e}", {"parsed": parsed}, e)

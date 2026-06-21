@@ -41,9 +41,14 @@ class EntityMatcher:
                 "chicken_biriyani": ["chicken biriyani", "chicken biryani"],
                 "mutton_biriyani": ["mutton biriyani", "mutton biryani"],
                 "sambar_rice": ["sambar rice"],
-                "plastic_waste": ["plastic waste"],
+                "plastic_waste": ["plastic waste", "plastic"],
+                "paper_waste": ["paper waste", "paper"],
+                "organic_waste": ["organic waste", "garbage", "kitchen waste", "vegetable waste", "fruit waste", "bio waste", "biodegradable waste"],
+                "food_waste": ["food waste", "leftover waste", "food scraps"],
+                "glass_waste": ["glass waste", "glass"],
+                "metal_waste": ["metal waste", "metal"],
                 "battery_waste": ["battery waste"],
-                "e_waste": ["e-waste", "ewaste"],
+                "e_waste": ["e-waste", "ewaste", "e waste", "electronic waste", "electronics waste", "mobile waste", "laptop waste", "phone waste", "computer waste", "device waste"],
                 "cricket": ["cricket", "played cricket", "play cricket", "playing cricket"]
             }
             for label, terms in self.patterns.items():

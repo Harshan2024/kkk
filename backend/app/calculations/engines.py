@@ -259,9 +259,8 @@ def calculate_food_emission(db: Session, item: str, quantity: float, unit: str, 
                 break
 
     if food_key:
-        factor_info = FOOD_FACTORS[food_key]
-        factor_val  = factor_info["factor"]
-        source_val  = factor_info["source"]
+        factor_val  = FOOD_FACTORS[food_key]
+        source_val  = "CarbonTracker Standard"
 
         # quantity is servings; formula: servings × factor
         servings = max(quantity, 1.0) if unit_clean in [
@@ -668,9 +667,8 @@ def calculate_generic_emission(db: Session, category: str, item: str, quantity: 
             weight_kg = quantity / 1000.0
             
         if waste_key:
-            factor_info = WASTE_FACTORS[waste_key]
-            factor_val = factor_info["factor"]
-            source_val = factor_info["source"]
+            factor_val = WASTE_FACTORS[waste_key]
+            source_val = "CarbonTracker Standard"
             
             formula_res = calculate_waste_co2(weight_kg, factor_val, source_val)
             

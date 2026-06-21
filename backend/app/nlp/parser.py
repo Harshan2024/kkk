@@ -122,18 +122,30 @@ KEYWORD_MAPPINGS = {
     "bulb": ("appliances", "lights", "hours"),
     
     # --- Waste ---
-    "organic waste": ("waste", "organic waste", "kg"),
-    "food waste": ("waste", "organic waste", "kg"),
-    "garbage": ("waste", "organic waste", "kg"),
-    "plastic waste": ("waste", "plastic waste", "kg"),
-    "plastic": ("waste", "plastic waste", "kg"),
-    "paper waste": ("waste", "paper waste", "kg"),
-    "paper": ("waste", "paper waste", "kg"),
-    "battery waste": ("waste", "battery waste", "kg"),
-    "e-waste": ("waste", "e-waste", "kg"),
-    "recycling": ("waste", "recycling", "kg"),
-    "recycled": ("waste", "recycling", "kg"),
-    
+    "electronic waste":  ("waste", "electronic waste",  "kg"),
+    "electronics waste": ("waste", "electronic waste",  "kg"),
+    "mobile waste":      ("waste", "electronic waste",  "kg"),
+    "laptop waste":      ("waste", "electronic waste",  "kg"),
+    "phone waste":       ("waste", "electronic waste",  "kg"),
+    "computer waste":    ("waste", "electronic waste",  "kg"),
+    "battery waste":     ("waste", "battery waste",     "kg"),
+    "plastic waste":     ("waste", "plastic waste",     "kg"),
+    "paper waste":       ("waste", "paper waste",       "kg"),
+    "glass waste":       ("waste", "glass waste",       "kg"),
+    "metal waste":       ("waste", "metal waste",       "kg"),
+    "organic waste":     ("waste", "organic waste",     "kg"),
+    "kitchen waste":     ("waste", "organic waste",     "kg"),
+    "vegetable waste":   ("waste", "organic waste",     "kg"),
+    "fruit waste":       ("waste", "organic waste",     "kg"),
+    "food waste":        ("waste", "food waste",        "kg"),
+    "e-waste":           ("waste", "e-waste",           "kg"),
+    "ewaste":            ("waste", "e-waste",           "kg"),
+    "e waste":           ("waste", "e-waste",           "kg"),
+    "plastic":           ("waste", "plastic waste",     "kg"),
+    "paper":             ("waste", "paper waste",       "kg"),
+    "garbage":           ("waste", "organic waste",     "kg"),
+
+
     # --- Water ---
     "water": ("water", "tap water", "L"),
     "shower": ("water", "tap water", "L"),
@@ -532,8 +544,8 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
                 category  = "transport"
                 item      = vehicle
                 unit      = "km"
-                confidence = 0.85
-                ambiguity  = 0.15
+                confidence = 0.95 if vehicle != "unknown_transport_mode" else 0.70
+                ambiguity  = 0.05 if vehicle != "unknown_transport_mode" else 0.30
 
     # ── Priority 0-D: Energy Intent + Wattage ─────────────────────────────
     # "charged my laptop for 1 hour using a 60W charger" → energy
@@ -622,8 +634,8 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
                     category  = "transport"
                     item      = "petrol car"
                     unit      = "km"
-                    confidence = 0.70
-                    ambiguity  = 0.30
+                    confidence = 0.95
+                    ambiguity  = 0.05
 
     # ── Priority 3: Legacy Food fallback (KEYWORD_MAPPINGS) ───────────────
     if not category and not skip_food_parsing:
@@ -796,12 +808,12 @@ def parse_activity_text(text: str) -> Dict[str, Any]:
         pass
 
     # Step 8 low-confidence fallback to "Unknown"
-    if confidence < 0.50:
+    if confidence < 0.90:
         category = "lifestyle"
         item = "Unknown"
         quantity = 0.0
         unit = "unit"
-        ambiguity = round(1.0 - confidence, 2)
+        ambiguity = 1.0
         suggestions = []
         intent_val = "unknown"
         

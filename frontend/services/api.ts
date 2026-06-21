@@ -165,6 +165,19 @@ export interface ParseResult {
   };
   calculated_value: number;
   metadata: ActivityMetadata;
+  parts?: {
+    parsed: {
+      category: string;
+      item: string;
+      quantity: number;
+      unit: string;
+      confidence: number;
+      suggestions: string[];
+      original_text: string;
+    };
+    calculated_value: number;
+    metadata: ActivityMetadata;
+  }[];
 }
 
 export interface ChatMessage {

@@ -46,6 +46,11 @@ LABEL_TO_CATEGORY = {
     "sambar_rice": "food",
     # Waste
     "plastic_waste": "waste",
+    "paper_waste": "waste",
+    "organic_waste": "waste",
+    "food_waste": "waste",
+    "glass_waste": "waste",
+    "metal_waste": "waste",
     "battery_waste": "waste",
     "e_waste": "waste",
     "cricket": "exercise",
@@ -173,6 +178,11 @@ def parse_spacy(text: str) -> Optional[Dict[str, Any]]:
         "washing_machine": "washing_machine",
         "laptop_charger": "laptop_charger",
         "plastic_waste": "plastic_waste",
+        "paper_waste": "paper_waste",
+        "organic_waste": "organic_waste",
+        "food_waste": "food_waste",
+        "glass_waste": "glass_waste",
+        "metal_waste": "metal_waste",
         "battery_waste": "battery_waste",
         "e_waste": "e_waste",
     }

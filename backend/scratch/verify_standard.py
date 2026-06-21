@@ -92,7 +92,8 @@ food_expected = {
     "candy": 0.05, "sweets": 0.20,
 }
 for dish, expected in food_expected.items():
-    actual = FOOD_FACTORS.get(dish, {}).get("factor", None)
+    val = FOOD_FACTORS.get(dish)
+    actual = val.get("factor") if isinstance(val, dict) else val
     ok = actual is not None and near(actual, expected)
     T("C-Factors", f"Food factor: {dish}", ok,
       f"expected={expected}, got={actual}")
@@ -145,7 +146,8 @@ waste_expected = {
     "glass waste": 0.9, "metal waste": 2.1,
 }
 for wtype, expected in waste_expected.items():
-    actual = WASTE_FACTORS.get(wtype, {}).get("factor", None)
+    val = WASTE_FACTORS.get(wtype)
+    actual = val.get("factor") if isinstance(val, dict) else val
     ok = actual is not None and near(actual, expected)
     T("E-Factors", f"Waste factor: {wtype}", ok,
       f"expected={expected}, got={actual}")
@@ -173,10 +175,10 @@ for val, expected in rounding_cases:
     T("F-Rounding", f"ROUND({val},2)={expected}", ok, f"got={actual}")
 
 # ── SECTION F: No Negative Outputs ───────────────────────────────────────────
-T("F-NoNeg", "All factors ≥ 0 (transport)", all(v["factor"]>=0 for v in TRANSPORT_FACTORS.values()), "")
-T("F-NoNeg", "All factors ≥ 0 (food)",      all(v["factor"]>=0 for v in FOOD_FACTORS.values()), "")
-T("F-NoNeg", "All factors ≥ 0 (waste)",     all(v["factor"]>=0 for v in WASTE_FACTORS.values()), "")
-T("F-NoNeg", "All factors ≥ 0 (shopping)",  all(v["factor"]>=0 for v in SHOPPING_FACTORS.values()), "")
+T("F-NoNeg", "All factors ≥ 0 (transport)", all((v.get("factor") if isinstance(v, dict) else v)>=0 for v in TRANSPORT_FACTORS.values() if v is not None), "")
+T("F-NoNeg", "All factors ≥ 0 (food)",      all((v.get("factor") if isinstance(v, dict) else v)>=0 for v in FOOD_FACTORS.values() if v is not None), "")
+T("F-NoNeg", "All factors ≥ 0 (waste)",     all((v.get("factor") if isinstance(v, dict) else v)>=0 for v in WASTE_FACTORS.values() if v is not None), "")
+T("F-NoNeg", "All factors ≥ 0 (shopping)",  all((v.get("factor") if isinstance(v, dict) else v)>=0 for v in SHOPPING_FACTORS.values() if v is not None), "")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # REPORT

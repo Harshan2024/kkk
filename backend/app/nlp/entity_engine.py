@@ -175,7 +175,7 @@ def extract_entities(text: str, intent: Optional[str] = None) -> dict:
         return {
             "entity": "unknown",
             "confidence": 0.0,
-            "matched_by": "none"
+            "error": "entity_not_found"
         }
 
     # Normalize spelling and synonyms
@@ -292,7 +292,7 @@ def extract_entities(text: str, intent: Optional[str] = None) -> dict:
         return {
             "entity": "unknown",
             "confidence": 0.0,
-            "matched_by": "none"
+            "error": "entity_not_found"
         }
 
     # Normalize entity to SmartString
@@ -415,6 +415,13 @@ def extract_entities(text: str, intent: Optional[str] = None) -> dict:
             result["product"] = SmartString("smartphone")
         else:
             result["product"] = SmartString(canonical_prod)
+
+    if confidence < 0.90:
+        return {
+            "entity": "unknown",
+            "confidence": 0.0,
+            "error": "entity_not_found"
+        }
 
     return result
 

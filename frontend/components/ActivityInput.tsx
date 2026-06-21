@@ -12,6 +12,33 @@ interface ActivityInputProps {
   region: string;
 }
 
+const getFactor = (part: any) => {
+  if (!part) return 0.0;
+  const metadata = part.metadata || {};
+  const parsed = part.parsed || {};
+  const factor = metadata.emission_factor ?? metadata.factor ?? parsed.factor ?? parsed.food_co2_kg ?? parsed.shopping_co2_kg;
+  if (factor !== undefined && factor !== null) {
+    return parseFloat(factor);
+  }
+  return 0.0;
+};
+
+const getFormula = (part: any) => {
+  if (!part) return "0.0";
+  const metadata = part.metadata || {};
+  const parsed = part.parsed || {};
+  if (metadata.formula) return metadata.formula;
+  if (parsed.formula) return parsed.formula;
+  
+  // Construct dynamically
+  const qty = parsed.quantity ?? 1.0;
+  const factor = getFactor(part);
+  
+  const qtyStr = Number.isInteger(qty) ? qty.toString() : qty.toFixed(2);
+  const factorStr = factor.toString();
+  return `${qtyStr} x ${factorStr}`;
+};
+
 export default function ActivityInput({ onActivityLogged, region }: ActivityInputProps) {
   const [inputText, setInputText] = useState("");
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
@@ -292,6 +319,62 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
                     {(parseResult as any).error ? `: ${String((parseResult as any).error).replace(/_/g, ' ')}` : ""}
                   </span>
                 </div>
+              ) : parseResult.parts && parseResult.parts.length > 1 ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5 col-span-3">
+                  {/* Left columns for list of entities grouped by category */}
+                  <div className="md:col-span-2 space-y-3">
+                    <span className="text-[10px] uppercase font-black tracking-widest text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded inline-block">
+                      Multi Entity
+                    </span>
+                    {parseResult.parts.map((part, idx) => (
+                      <div key={idx} className="space-y-1 bg-white/[0.01] border border-white/5 p-3 rounded-xl">
+                        <div className="flex justify-between items-center mb-1.5">
+                          <span className="capitalize text-white font-extrabold">{part.parsed?.item ?? "Unknown"}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider border leading-none font-black ${getCategoryColor(part.parsed?.category)}`}>
+                            {part.parsed?.category ?? "Unknown"}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-1 text-[11px] font-bold text-stone-500">
+                          <div className="flex justify-between">
+                            <span>Quantity:</span>
+                            <span className="text-stone-300">{part.parsed?.quantity ?? 1.0} {part.parsed?.unit ?? "unit"}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Factor:</span>
+                            <span className="text-stone-300">{getFactor(part)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Formula:</span>
+                            <span className="text-stone-300">{getFormula(part)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Subtotal:</span>
+                            <span className="text-emerald-450">{part.calculated_value.toFixed(2)} kg CO₂</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Emissions Result Box */}
+                  <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/10 p-3 flex flex-col justify-between items-center text-center">
+                    <div>
+                      <span className="text-[9px] text-emerald-400 font-extrabold uppercase tracking-widest block mb-0.5">
+                        Total Carbon
+                      </span>
+                      <div className="text-xl font-black text-white font-sans">
+                        {(parseResult?.calculated_value ?? 0.0).toFixed(2)} <span className="text-[10px] text-stone-500 uppercase">kg CO₂</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleSubmit}
+                      disabled={logging}
+                      className="mt-4 w-full py-1.5 bg-emerald-500 hover:bg-emerald-450 text-[#080d0a] rounded-lg text-[10px] font-black uppercase transition-all tracking-wider active:scale-95 cursor-pointer shadow shadow-emerald-500/10"
+                    >
+                      Log all activities
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                   {/* Parsed Entities */}
@@ -319,10 +402,10 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
                     </div>
                   </div>
 
-                  {/* Scientific Conversions */}
+                  {/* Formula Transparency (Solution 5) */}
                   <div className="space-y-1.5 font-bold text-xs">
                     <span className="text-[9px] uppercase font-black tracking-widest text-stone-500">
-                      Metrics
+                      Formula Transparency
                     </span>
                     <div className="space-y-1">
                       <div className="flex justify-between">
@@ -331,17 +414,11 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
                       </div>
                       <div className="flex justify-between">
                         <span className="text-stone-500">Factor:</span>
-                        <span className="text-stone-400 truncate max-w-[90px]">
-                          {parseResult?.metadata?.emission_factor !== undefined 
-                            ? `${parseResult?.metadata?.emission_factor} kg` 
-                            : ((parseResult?.parsed as any)?.factor !== undefined ? `${(parseResult?.parsed as any)?.factor} kg` : "dynamic")}
-                        </span>
+                        <span className="text-stone-300">{getFactor(parseResult)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-stone-500">Method:</span>
-                        <span className="text-stone-400 truncate max-w-[90px] capitalize">
-                          {parseResult?.metadata?.calculation_type?.replace("_", " ") || (parseResult?.parsed as any)?.method?.replace("_", " ") || "standard"}
-                        </span>
+                        <span className="text-stone-500">Formula:</span>
+                        <span className="text-stone-300">{getFormula(parseResult)}</span>
                       </div>
                     </div>
                   </div>
@@ -350,10 +427,10 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
                   <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/10 p-3 flex flex-col justify-between items-center text-center">
                     <div>
                       <span className="text-[9px] text-emerald-400 font-extrabold uppercase tracking-widest block mb-0.5">
-                        CO₂ Output
+                        CO₂ Subtotal
                       </span>
                       <div className="text-xl font-black text-white font-sans">
-                        {(parseResult?.calculated_value ?? 0.0).toFixed(2)} <span className="text-[10px] text-stone-500 uppercase">kg</span>
+                        {(parseResult?.calculated_value ?? 0.0).toFixed(2)} <span className="text-[10px] text-stone-500 uppercase">kg CO₂</span>
                       </div>
                       {parseResult?.parsed?.category === "exercise" && (
                         <span className="mt-1.5 inline-block px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-bold">

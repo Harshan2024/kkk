@@ -229,6 +229,179 @@ def process_multimodal_ocr_async(user_id: int, extracted_items: list, region: st
 
 router = APIRouter()
 
+def get_factor_helper(part: dict) -> float:
+    if not part:
+        return 0.0
+    metadata = part.get("metadata") or {}
+    parsed = part.get("parsed") or {}
+    factor = metadata.get("emission_factor") or metadata.get("factor") or parsed.get("factor") or parsed.get("food_co2_kg") or parsed.get("shopping_co2_kg") or 0.0
+    return float(factor)
+
+def get_formula_helper(part: dict, factor: float) -> str:
+    if not part:
+        return "0.0"
+    metadata = part.get("metadata") or {}
+    parsed = part.get("parsed") or {}
+    if metadata.get("formula"):
+        return metadata["formula"]
+    if parsed.get("formula"):
+        return parsed["formula"]
+    qty = parsed.get("quantity") or 1.0
+    qty_str = str(int(qty)) if float(qty).is_integer() else str(round(qty, 2))
+    return f"{qty_str} x {factor:.2f}"
+
+CANONICAL_DISPLAY_MAP = {
+    "chicken_biriyani": "Chicken Biriyani",
+    "chicken biriyani": "Chicken Biriyani",
+    "chicken biryani": "Chicken Biriyani",
+    "chicken briyani": "Chicken Biriyani",
+    "mutton_biriyani": "Mutton Biriyani",
+    "mutton biriyani": "Mutton Biriyani",
+    "mutton biryani": "Mutton Biriyani",
+    "mutton briyani": "Mutton Biriyani",
+    "egg_rice": "Egg Rice",
+    "egg rice": "Egg Rice",
+    "egg_noodles": "Egg Noodles",
+    "egg noodles": "Egg Noodles",
+    "veg_noodles": "Veg Noodles",
+    "veg noodles": "Veg Noodles",
+    "dosa": "Dosa",
+    "idli": "Idli",
+    "idly": "Idli",
+    "pongal": "Pongal",
+    "upma": "Upma",
+    "sambar_rice": "Sambar Rice",
+    "sambar rice": "Sambar Rice",
+    "rasam_rice": "Rasam Rice",
+    "rasam rice": "Rasam Rice",
+    "curd_rice": "Curd Rice",
+    "curd rice": "Curd Rice",
+    "lemon_rice": "Lemon Rice",
+    "lemon rice": "Lemon Rice",
+    "tomato_rice": "Tomato Rice",
+    "tomato rice": "Tomato Rice",
+    "veg_fried_rice": "Veg Fried Rice",
+    "veg fried rice": "Veg Fried Rice",
+    "coffee": "Coffee",
+    "tea": "Tea",
+    "cake": "Cake",
+    "chocolate": "Chocolate",
+    "ice_cream": "Ice Cream",
+    "ice cream": "Ice Cream",
+    "icecream": "Ice Cream",
+    "candy": "Candy",
+    "sweet": "Sweet",
+    "sweets": "Sweets",
+    "boiled_egg": "Boiled Egg",
+    "boiled egg": "Boiled Egg",
+    "boiled eggs": "Boiled Egg",
+    "omelette": "Olette",
+    "omelet": "Olette",
+    "chicken_rice": "Chicken Rice",
+    "chicken rice": "Chicken Rice",
+    "chicken_noodles": "Chicken Noodles",
+    "chicken noodles": "Chicken Noodles",
+    "chicken_burger": "Chicken Burger",
+    "chicken burger": "Chicken Burger",
+    "chicken_pizza": "Chicken Pizza",
+    "chicken pizza": "Chicken Pizza",
+    "mutton_rice": "Mutton Rice",
+    "mutton rice": "Mutton Rice",
+    
+    # Waste
+    "e_waste": "E-Waste",
+    "e-waste": "E-Waste",
+    "electronic_waste": "E-Waste",
+    "electronic waste": "E-Waste",
+    "ewaste": "E-Waste",
+    "e waste": "E-Waste",
+    "plastic_waste": "Plastic Waste",
+    "plastic waste": "Plastic Waste",
+    "paper_waste": "Paper Waste",
+    "paper waste": "Paper Waste",
+    "battery_waste": "Battery Waste",
+    "battery waste": "Battery Waste",
+    "organic_waste": "Organic Waste",
+    "organic waste": "Organic Waste",
+    "food_waste": "Food Waste",
+    "food waste": "Food Waste",
+    "glass_waste": "Glass Waste",
+    "glass waste": "Glass Waste",
+    "metal_waste": "Metal Waste",
+    "metal waste": "Metal Waste",
+}
+
+def canonical_display(name: str) -> str:
+    if not name:
+        return "Unknown"
+    name_clean = str(name).strip().lower().replace("-", "_")
+    
+    # Check map
+    mapped = CANONICAL_DISPLAY_MAP.get(name_clean)
+    if mapped:
+        return mapped
+    # Check with raw lower
+    mapped_raw = CANONICAL_DISPLAY_MAP.get(str(name).strip().lower())
+    if mapped_raw:
+        return mapped_raw
+        
+    return str(name).replace("_", " ").title()
+
+def make_standardized_parse_response(status: str, error: str = "", intent: str = "unknown", entities: list = None, total_carbon: float = 0.0, success: bool = True, data: dict = None, text: str = ""):
+    if entities is None:
+        entities = []
+    
+    clean_entities = []
+    for ent in entities:
+        clean_entities.append({
+            "entity": canonical_display(ent.get("entity")),
+            "quantity": float(ent.get("quantity") or 0.0),
+            "factor": float(ent.get("factor") or 0.0),
+            "formula": ent.get("formula") or "",
+            "subtotal": float(ent.get("subtotal") or 0.0)
+        })
+        
+    entity_val = "unknown"
+    confidence_val = 0.0
+    if clean_entities:
+        entity_val = clean_entities[0]["entity"]
+        if data and data.get("parsed"):
+            confidence_val = float(data["parsed"].get("confidence") or 0.0)
+            
+    if status == "error":
+        entity_val = "unknown"
+        confidence_val = 0.0
+
+    return {
+        "status": status,
+        "error": error or "none",
+        "intent": intent or "unknown",
+        "entities": clean_entities,
+        "total_carbon": float(total_carbon),
+        "entity": entity_val,
+        "confidence": confidence_val,
+        "success": success,
+        "data": data or {
+            "success": success,
+            "error": error or "none",
+            "parsed": {
+                "category": "lifestyle",
+                "item": "unknown",
+                "entity": "unknown",
+                "confidence": 0.0,
+                "error": error or "entity_not_found",
+                "quantity": 0.0,
+                "unit": "unit",
+                "factor": 0.0,
+                "suggestions": [],
+                "original_text": text
+            },
+            "calculated_value": 0.0,
+            "metadata": {},
+            "parts": []
+        }
+    }
+
 # Schema definitions for Phase-3
 class ActivityLogRequest(BaseModel):
     text: str
@@ -268,14 +441,22 @@ def parse_activity(
             raise TimeoutError("Processing exceeded 2 seconds")
 
     # Direct check for known unknown entities to return immediately within 500 ms
-    unknown_terms = {"spaceship", "quantum engine", "warp drive", "alien vehicle"}
+    unknown_terms = {"spaceship", "quantum engine", "warp drive", "alien vehicle", "unknown food", "alien food", "unknown material"}
     text_lower = text.lower().strip()
     if any(term in text_lower for term in unknown_terms):
         logger.info("Intent Detection Time: 0.00 ms")
         logger.info("Entity Extraction Time: 0.00 ms")
         logger.info("Carbon Calculation Time: 0.00 ms")
         logger.info(f"Total Request Time: {(time.time() - start_time) * 1000:.2f} ms")
-        return {"error": "unknown_transport_mode"}
+        return make_standardized_parse_response(
+            status="error",
+            error="entity_not_found",
+            intent="unknown",
+            entities=[],
+            total_carbon=0.0,
+            success=False,
+            text=text
+        )
 
     try:
         check_timeout()
@@ -295,14 +476,27 @@ def parse_activity(
         
         check_timeout()
         
-        # Check if any part resolved to unknown_transport_mode
+        # Check if any part resolved to unknown_transport_mode or entity == unknown or low confidence
         for p in parts:
-            if p.get("item") == "unknown_transport_mode" or p.get("entity") == "unknown":
+            if (
+                p.get("item") == "unknown_transport_mode"
+                or p.get("entity") == "unknown"
+                or p.get("item") == "Unknown"
+                or p.get("confidence", 0.0) < 0.90
+            ):
                 logger.info(f"Intent Detection Time: {intent_detection_time:.2f} ms")
                 logger.info(f"Entity Extraction Time: {entity_extraction_time:.2f} ms")
                 logger.info("Carbon Calculation Time: 0.00 ms")
                 logger.info(f"Total Request Time: {(time.time() - start_time) * 1000:.2f} ms")
-                return {"error": "unknown_transport_mode"}
+                return make_standardized_parse_response(
+                    status="error",
+                    error="entity_not_found",
+                    intent="unknown",
+                    entities=[],
+                    total_carbon=0.0,
+                    success=False,
+                    text=text
+                )
                 
         # 3. Carbon Calculation Time
         from app.services.activity_service import calculate_emissions
@@ -317,7 +511,16 @@ def parse_activity(
             total_emissions += em_val
             
             p["category"] = sanitize_category(p.get("category"))
+            p["entity"] = p.get("item") or "unknown"
+            p["factor"] = sanitize_float(metadata.get("emission_factor") or metadata.get("factor") or p.get("food_co2_kg") or p.get("shopping_co2_kg"), 0.0)
+            p["quantity"] = sanitize_float(p.get("quantity"), 1.0)
+            p["confidence"] = sanitize_float(p.get("confidence"), 0.0)
             
+            if p.get("item") == "unknown" or p.get("entity") == "unknown" or p.get("category") == "lifestyle" or p.get("confidence", 0.0) < 0.90:
+                p["entity"] = "unknown"
+                p["confidence"] = 0.0
+                p["error"] = "entity_not_found"
+
             parsed_parts.append({
                 "parsed": p,
                 "calculated_value": round(em_val, 4),
@@ -333,69 +536,77 @@ def parse_activity(
         logger.info(f"Total Request Time: {(time.time() - start_time) * 1000:.2f} ms")
             
         # Return first part as main body for backward compatibility, alongside full list
-        if not parsed_parts:
-            return {
-                "success": False,
-                "data": {
-                    "success": False,
-                    "error": "No parseable activity found in input text",
-                    "parsed": {
-                        "category": "lifestyle",
-                        "item": "unknown",
-                        "quantity": 1.0,
-                        "unit": "unit",
-                        "confidence": 0.0,
-                        "suggestions": [],
-                        "original_text": text
-                    },
-                    "calculated_value": 0.0,
-                    "metadata": {},
-                    "parts": []
-                },
-                "error": "No parseable activity found"
-            }
+        if not parsed_parts or any(p["parsed"].get("entity") == "unknown" for p in parsed_parts):
+            return make_standardized_parse_response(
+                status="error",
+                error="entity_not_found",
+                intent="unknown",
+                entities=[],
+                total_carbon=0.0,
+                success=False,
+                text=text
+            )
+            
         main_part = parsed_parts[0]
         track_latency("parser", start_time)
         
-        return {
+        intent_detected = main_part["parsed"].get("intent", "lifestyle")
+        if intent_detected == "unknown" or not intent_detected:
+            intent_detected = main_part["parsed"].get("category", "lifestyle")
+
+        # Build standard entities list for Solution 6 success schema
+        standard_entities = []
+        for part in parsed_parts:
+            parsed_data = part["parsed"]
+            fact_val = get_factor_helper(part)
+            form_val = get_formula_helper(part, fact_val)
+            standard_entities.append({
+                "entity": parsed_data.get("item") or "unknown",
+                "quantity": float(parsed_data.get("quantity") or 1.0),
+                "factor": float(fact_val),
+                "formula": form_val,
+                "subtotal": float(part.get("calculated_value") or 0.0)
+            })
+
+        response_data = {
             "success": True,
-            "data": {
-                "success": True,
-                "parsed": main_part["parsed"],
-                "calculated_value": round(total_emissions, 4),
-                "metadata": main_part["metadata"],
-                "parts": parsed_parts
-            },
-            "error": None
+            "parsed": main_part["parsed"],
+            "calculated_value": round(total_emissions, 4),
+            "metadata": main_part["metadata"],
+            "parts": parsed_parts
         }
+        
+        return make_standardized_parse_response(
+            status="success",
+            intent=str(intent_detected).lower(),
+            entities=standard_entities,
+            total_carbon=round(total_emissions, 4),
+            success=True,
+            data=response_data,
+            text=text
+        )
     except TimeoutError as te:
         logger.error(f"Request timeout in activities/parse: {str(te)}")
-        return {
-            "error": "diagnostic_timeout_error",
-            "message": "Processing exceeded 2 seconds"
-        }
+        return make_standardized_parse_response(
+            status="error",
+            error="diagnostic_timeout_error",
+            intent="unknown",
+            entities=[],
+            total_carbon=0.0,
+            success=False,
+            text=text
+        )
     except Exception as e:
         logger.error(f"Error parsing activity preview: {str(e)}\n{traceback.format_exc()}")
-        return {
-            "success": False,
-            "data": {
-                "success": False,
-                "error": f"Parsing preview failed: {str(e)}",
-                "parsed": {
-                    "category": "lifestyle",
-                    "item": "unknown",
-                    "quantity": 1.0,
-                    "unit": "unit",
-                    "confidence": 0.0,
-                    "suggestions": [],
-                    "original_text": text
-                },
-                "calculated_value": 0.0,
-                "metadata": {},
-                "parts": []
-            },
-            "error": f"Parsing preview failed: {str(e)}"
-        }
+        return make_standardized_parse_response(
+            status="error",
+            error="entity_not_found",
+            intent="unknown",
+            entities=[],
+            total_carbon=0.0,
+            success=False,
+            text=text
+        )
 
 # POST /activities
 @router.post("/activities")
@@ -1678,10 +1889,63 @@ def api_extract_entities_get(
     has_splitters = any(s in text.lower() for s in MULTI_INTENT_SPLITTERS)
     if has_splitters:
         res = extract_multi_entities(text)
-        return {"success": True, "data": res}
     else:
         res = extract_entities(text, intent=intent)
-        return {"success": True, "data": res}
+
+    # Check for error/fallback
+    is_error = False
+    if isinstance(res, list):
+        if not res or any(r.get("entity") == "unknown" for r in res):
+            is_error = True
+    else:
+        if not res or res.get("entity") == "unknown" or res.get("confidence", 0.0) < 0.90:
+            is_error = True
+
+    if is_error:
+        return make_standardized_parse_response(
+            status="error",
+            error="entity_not_found",
+            intent="unknown",
+            entities=[],
+            total_carbon=0.0,
+            success=False,
+            text=text
+        )
+
+    # Success path
+    intent_detected = "unknown"
+    standard_entities = []
+    if isinstance(res, list):
+        for r in res:
+            intent_detected = r.get("intent") or r.get("category") or intent_detected
+            standard_entities.append({
+                "entity": r.get("entity") or "unknown",
+                "quantity": float(r.get("quantity") or 1.0),
+                "factor": float(r.get("factor") or 0.0),
+                "formula": r.get("formula") or f"{r.get('quantity', 1.0)} x {r.get('factor', 0.0)}",
+                "subtotal": float(r.get("calculated_value") or 0.0)
+            })
+    else:
+        intent_detected = res.get("intent") or res.get("category") or intent_detected
+        standard_entities.append({
+            "entity": res.get("entity") or "unknown",
+            "quantity": float(res.get("quantity") or 1.0),
+            "factor": float(res.get("factor") or 0.0),
+            "formula": res.get("formula") or f"{res.get('quantity', 1.0)} x {res.get('factor', 0.0)}",
+            "subtotal": float(res.get("calculated_value") or 0.0)
+        })
+
+    total_carb = sum(ent["subtotal"] for ent in standard_entities)
+
+    return make_standardized_parse_response(
+        status="success",
+        intent=str(intent_detected).lower(),
+        entities=standard_entities,
+        total_carbon=total_carb,
+        success=True,
+        data=res,
+        text=text
+    )
 
 @router.post("/entities/extract")
 def api_extract_entities_post(payload: EntityExtractRequest):
@@ -1690,10 +1954,63 @@ def api_extract_entities_post(payload: EntityExtractRequest):
     has_splitters = any(s in payload.text.lower() for s in MULTI_INTENT_SPLITTERS)
     if has_splitters:
         res = extract_multi_entities(payload.text)
-        return {"success": True, "data": res}
     else:
         res = extract_entities(payload.text, intent=payload.intent)
-        return {"success": True, "data": res}
+
+    # Check for error/fallback
+    is_error = False
+    if isinstance(res, list):
+        if not res or any(r.get("entity") == "unknown" for r in res):
+            is_error = True
+    else:
+        if not res or res.get("entity") == "unknown" or res.get("confidence", 0.0) < 0.90:
+            is_error = True
+
+    if is_error:
+        return make_standardized_parse_response(
+            status="error",
+            error="entity_not_found",
+            intent="unknown",
+            entities=[],
+            total_carbon=0.0,
+            success=False,
+            text=payload.text
+        )
+
+    # Success path
+    intent_detected = "unknown"
+    standard_entities = []
+    if isinstance(res, list):
+        for r in res:
+            intent_detected = r.get("intent") or r.get("category") or intent_detected
+            standard_entities.append({
+                "entity": r.get("entity") or "unknown",
+                "quantity": float(r.get("quantity") or 1.0),
+                "factor": float(r.get("factor") or 0.0),
+                "formula": r.get("formula") or f"{r.get('quantity', 1.0)} x {r.get('factor', 0.0)}",
+                "subtotal": float(r.get("calculated_value") or 0.0)
+            })
+    else:
+        intent_detected = res.get("intent") or res.get("category") or intent_detected
+        standard_entities.append({
+            "entity": res.get("entity") or "unknown",
+            "quantity": float(res.get("quantity") or 1.0),
+            "factor": float(res.get("factor") or 0.0),
+            "formula": res.get("formula") or f"{res.get('quantity', 1.0)} x {res.get('factor', 0.0)}",
+            "subtotal": float(res.get("calculated_value") or 0.0)
+        })
+
+    total_carb = sum(ent["subtotal"] for ent in standard_entities)
+
+    return make_standardized_parse_response(
+        status="success",
+        intent=str(intent_detected).lower(),
+        entities=standard_entities,
+        total_carbon=total_carb,
+        success=True,
+        data=res,
+        text=payload.text
+    )
 
 
 
