@@ -63,7 +63,8 @@ for i in range(max_wait // 2):
     try:
         response = urllib.request.urlopen(f"{url_base}/", timeout=1)
         if response.getcode() == 200:
-            print(f"Server is up and running after {i*2 + 2} seconds!")
+            print(f"Server is up and running after {i*2 + 2} seconds! Waiting 6 seconds for background DB retries to fail...")
+            time.sleep(6)
             server_started = True
             break
     except Exception:

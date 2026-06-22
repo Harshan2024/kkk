@@ -102,6 +102,7 @@ function HomeContent() {
     setRegion,
     loadDashboardData,
     metrics,
+    fetchAnalytics,
   } = useAIStore();
 
   const [currentTab, setCurrentTab] = useState("dashboard");
@@ -113,6 +114,12 @@ function HomeContent() {
     window.addEventListener("open-copilot", handleOpen);
     return () => window.removeEventListener("open-copilot", handleOpen);
   }, []);
+
+  useEffect(() => {
+    if (currentTab === "analytics") {
+      fetchAnalytics();
+    }
+  }, [currentTab, fetchAnalytics]);
 
   // Memoized gamification values — only recalculate when dependencies change
   const { xp, level, streak } = useMemo(() => {

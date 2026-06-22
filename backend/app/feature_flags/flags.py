@@ -6,7 +6,8 @@ DEFAULT_FLAGS = {
     "enable_voice_ai": True,
     "enable_multimodal": True,
     "enable_forecasting": True,
-    "enable_semantic_search": True
+    "enable_semantic_search": True,
+    "FORECAST_ENABLED": False
 }
 
 def get_feature_flags() -> Dict[str, bool]:

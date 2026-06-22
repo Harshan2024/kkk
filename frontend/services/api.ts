@@ -220,6 +220,50 @@ export interface SystemHealth {
   failed?: boolean;
 }
 
+export interface DailySummary {
+  date: string;
+  activities: number;
+  total_carbon: number;
+  average: number;
+  highest_activity: string;
+  highest_carbon: number;
+  trend_value: number;
+  trend_status: string;
+}
+
+export interface WeeklySummary {
+  weekly_total: number;
+  daily_average: number;
+  highest_day: string;
+  highest_emission: number;
+  trend_value: number;
+  trend_status: string;
+}
+
+export interface MonthlySummary {
+  monthly_total: number;
+  daily_average: number;
+  trend_value: number;
+  trend_status: string;
+}
+
+export interface AnalyticsPayload {
+  daily: DailySummary;
+  weekly: WeeklySummary;
+  monthly: MonthlySummary;
+  category_breakdown: Record<string, number>;
+  rankings: {
+    top_sources: { activity: string; carbon: number }[];
+    bottom_sources: { activity: string; carbon: number }[];
+    most_frequent: { activity: string; count: number }[];
+  };
+  sustainability: {
+    score: number;
+    grade: string;
+  };
+  recommendations: string[];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // INTERNAL FETCH HELPER
 // ─────────────────────────────────────────────────────────────────────────────
@@ -490,6 +534,10 @@ class ApiService {
     return this.request<any>(`/habit-analysis?username=${username}`);
   }
 
+  async getAnalytics(username = "demo_user"): Promise<AnalyticsPayload> {
+    return this.request<AnalyticsPayload>(`/analytics?username=${username}`);
+  }
+
   async correctActivity(
     original_text: string,
     corrected_text: string,
@@ -638,6 +686,9 @@ class ApiService {
       }
 
       const result = await response.json();
+      if (result && typeof result === "object" && "data" in result) {
+        return result.data as SystemHealth;
+      }
       return result as SystemHealth;
     } catch (err: any) {
       // Only use Logger.error() for 500 server errors, database failures, and unexpected exceptions
@@ -659,6 +710,15 @@ class ApiService {
         iot: "offline",
         failed: true,
       };
+    }
+  }
+
+  async getFeatureFlags(): Promise<Record<string, boolean>> {
+    try {
+      return await this.request<Record<string, boolean>>("/feature-flags");
+    } catch (err) {
+      logger.warn("ApiService", "Failed to fetch feature flags", { error: err });
+      return {};
     }
   }
 }

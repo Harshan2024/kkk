@@ -1,18 +1,18 @@
-import type { Config } from "tailwindcss";
-
-const config: Config = {
+/** @type {import('tailwindcss').Config} */
+module.exports = {
   content: [
-    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
-    "./components/**/*.{js,ts,jsx,tsx,mdx}",
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./stores/**/*.{js,ts,jsx,tsx}",
+    "./services/**/*.{js,ts,jsx,tsx}"
   ],
-  darkMode: "class", // supports light/dark toggle
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
         background: {
-          light: "#f4f6f3", // Light grey-green tint
-          dark: "#0b120f",  // Deep dark forest charcoal
+          light: "#f4f6f3",
+          dark: "#0b120f",
         },
         card: {
           light: "rgba(255, 255, 255, 0.7)",
@@ -68,5 +68,3 @@ const config: Config = {
   },
   plugins: [],
 };
-
-export default config;

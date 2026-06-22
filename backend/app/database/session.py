@@ -93,7 +93,7 @@ Base = declarative_base()
 
 def enter_offline_mode():
     """Enters read-only degraded mode without SQLite writes."""
-    global READ_ONLY_MODE
+    global READ_ONLY_MODE, LAST_DB_CHECK_RESULT
     log_structured(
         level="CRITICAL",
         service="database_session",
@@ -111,6 +111,7 @@ def enter_offline_mode():
             pass
     else:
         READ_ONLY_MODE = True
+    LAST_DB_CHECK_RESULT = False
     # Try to seed default factors in the fallback DB just in case, but keep writes disabled
     try:
         from app.emissions.factors import seed_db
@@ -128,7 +129,7 @@ def verify_database_connection(retries: int = 3, base_delay: float = 0.5) -> boo
     Returns True if connection is verified, False otherwise.
     Never raises — always returns bool.
     """
-    global READ_ONLY_MODE
+    global READ_ONLY_MODE, LAST_DB_CHECK_RESULT
     if OFFLINE_MODE and READ_ONLY_MODE:
         log_structured("WARNING", "database_session", "Database is in READ-ONLY DEGRADED MODE — skipping connection verification.")
         return False
@@ -142,6 +143,7 @@ def verify_database_connection(retries: int = 3, base_delay: float = 0.5) -> boo
             elapsed_time = (time.perf_counter() - start_time) * 1000
             print(f"Database Connection Time: {elapsed_time:.2f}ms")
             log_structured("INFO", "database_session", f"Database Connection Time: {elapsed_time:.2f}ms")
+            LAST_DB_CHECK_RESULT = True
             return True
         except Exception as e:
             delay = base_delay * (2 ** (attempt - 1))
@@ -167,7 +169,7 @@ def verify_database_connection(retries: int = 3, base_delay: float = 0.5) -> boo
 # Throttled health check states
 LAST_DB_CHECK_TIME = 0.0
 DB_CHECK_THROTTLE_SECONDS = 5.0
-LAST_DB_CHECK_RESULT = True
+LAST_DB_CHECK_RESULT = False
 
 def check_database_health_fast() -> bool:
     """

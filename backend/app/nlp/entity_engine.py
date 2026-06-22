@@ -455,9 +455,8 @@ def extract_multi_entities(text: str) -> list[dict]:
             intent = first_intent
             
         res = extract_entities(seg_clean, intent=intent)
-        if res.get("entity") != "unknown":
-            if not first_intent:
-                first_intent = res.get("intent") or intent
-            results.append(res)
+        if not first_intent and res.get("entity") != "unknown":
+            first_intent = res.get("intent") or intent
+        results.append(res)
             
     return results

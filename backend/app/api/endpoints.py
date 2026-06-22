@@ -251,6 +251,9 @@ def get_formula_helper(part: dict, factor: float) -> str:
     return f"{qty_str} x {factor:.2f}"
 
 CANONICAL_DISPLAY_MAP = {
+    "unknown": "Unknown Entity",
+    "unknown_entity": "Unknown Entity",
+    "unknown_transport_mode": "Unknown Entity",
     "chicken_biriyani": "Chicken Biriyani",
     "chicken biriyani": "Chicken Biriyani",
     "chicken biryani": "Chicken Biriyani",
@@ -441,9 +444,11 @@ def parse_activity(
             raise TimeoutError("Processing exceeded 2 seconds")
 
     # Direct check for known unknown entities to return immediately within 500 ms
+    from app.nlp.intent_patterns import MULTI_INTENT_SPLITTERS
+    has_splitters = any(s in text.lower() for s in MULTI_INTENT_SPLITTERS)
     unknown_terms = {"spaceship", "quantum engine", "warp drive", "alien vehicle", "unknown food", "alien food", "unknown material"}
     text_lower = text.lower().strip()
-    if any(term in text_lower for term in unknown_terms):
+    if not has_splitters and any(term in text_lower for term in unknown_terms):
         logger.info("Intent Detection Time: 0.00 ms")
         logger.info("Entity Extraction Time: 0.00 ms")
         logger.info("Carbon Calculation Time: 0.00 ms")
@@ -475,30 +480,35 @@ def parse_activity(
         entity_extraction_time = (time.time() - t_entity_start) * 1000
         
         check_timeout()
-        
-        # Check if any part resolved to unknown_transport_mode or entity == unknown or low confidence
+               # Check if all parts are unknown/low confidence
+        all_parts_unknown = True
         for p in parts:
-            if (
+            is_p_unknown = (
                 p.get("item") == "unknown_transport_mode"
                 or p.get("entity") == "unknown"
                 or p.get("item") == "Unknown"
                 or p.get("confidence", 0.0) < 0.90
-            ):
-                logger.info(f"Intent Detection Time: {intent_detection_time:.2f} ms")
-                logger.info(f"Entity Extraction Time: {entity_extraction_time:.2f} ms")
-                logger.info("Carbon Calculation Time: 0.00 ms")
-                logger.info(f"Total Request Time: {(time.time() - start_time) * 1000:.2f} ms")
-                return make_standardized_parse_response(
-                    status="error",
-                    error="entity_not_found",
-                    intent="unknown",
-                    entities=[],
-                    total_carbon=0.0,
-                    success=False,
-                    text=text
-                )
+            )
+            if not is_p_unknown:
+                all_parts_unknown = False
+                break
+
+        if all_parts_unknown:
+            logger.info(f"Intent Detection Time: {intent_detection_time:.2f} ms")
+            logger.info(f"Entity Extraction Time: {entity_extraction_time:.2f} ms")
+            logger.info("Carbon Calculation Time: 0.00 ms")
+            logger.info(f"Total Request Time: {(time.time() - start_time) * 1000:.2f} ms")
+            return make_standardized_parse_response(
+                status="error",
+                error="entity_not_found",
+                intent="unknown",
+                entities=[],
+                total_carbon=0.0,
+                success=False,
+                text=text
+            )
                 
-        # 3. Carbon Calculation Time
+        # ── Step 3: Carbon Calculation Time
         from app.services.activity_service import calculate_emissions
         t_carbon_start = time.time()
         
@@ -506,21 +516,37 @@ def parse_activity(
         parsed_parts = []
         for p in parts:
             check_timeout()
-            emissions, metadata = calculate_emissions(db, p, region=region)
-            em_val = sanitize_float(emissions, 0.0)
-            total_emissions += em_val
             
-            p["category"] = sanitize_category(p.get("category"))
-            p["entity"] = p.get("item") or "unknown"
-            p["factor"] = sanitize_float(metadata.get("emission_factor") or metadata.get("factor") or p.get("food_co2_kg") or p.get("shopping_co2_kg"), 0.0)
-            p["quantity"] = sanitize_float(p.get("quantity"), 1.0)
-            p["confidence"] = sanitize_float(p.get("confidence"), 0.0)
+            is_p_unknown = (
+                p.get("item") == "unknown_transport_mode"
+                or p.get("entity") == "unknown"
+                or p.get("item") == "Unknown"
+                or p.get("confidence", 0.0) < 0.90
+            )
             
-            if p.get("item") == "unknown" or p.get("entity") == "unknown" or p.get("category") == "lifestyle" or p.get("confidence", 0.0) < 0.90:
+            if is_p_unknown:
                 p["entity"] = "unknown"
+                p["item"] = "unknown"
                 p["confidence"] = 0.0
                 p["error"] = "entity_not_found"
+                p["category"] = "lifestyle"
+                p["quantity"] = 0.0
+                p["unit"] = "unit"
+                p["factor"] = 0.0
+                p["formula"] = ""
+                em_val = 0.0
+                metadata = {}
+            else:
+                emissions, metadata = calculate_emissions(db, p, region=region)
+                em_val = sanitize_float(emissions, 0.0)
+                
+                p["category"] = sanitize_category(p.get("category"))
+                p["entity"] = p.get("item") or "unknown"
+                p["factor"] = sanitize_float(metadata.get("emission_factor") or metadata.get("factor") or p.get("food_co2_kg") or p.get("shopping_co2_kg"), 0.0)
+                p["quantity"] = sanitize_float(p.get("quantity"), 1.0)
+                p["confidence"] = sanitize_float(p.get("confidence"), 0.0)
 
+            total_emissions += em_val
             parsed_parts.append({
                 "parsed": p,
                 "calculated_value": round(em_val, 4),
@@ -536,7 +562,7 @@ def parse_activity(
         logger.info(f"Total Request Time: {(time.time() - start_time) * 1000:.2f} ms")
             
         # Return first part as main body for backward compatibility, alongside full list
-        if not parsed_parts or any(p["parsed"].get("entity") == "unknown" for p in parsed_parts):
+        if not parsed_parts or all(p["parsed"].get("entity") == "unknown" for p in parsed_parts):
             return make_standardized_parse_response(
                 status="error",
                 error="entity_not_found",
@@ -562,7 +588,7 @@ def parse_activity(
             form_val = get_formula_helper(part, fact_val)
             standard_entities.append({
                 "entity": parsed_data.get("item") or "unknown",
-                "quantity": float(parsed_data.get("quantity") or 1.0),
+                "quantity": float(parsed_data.get("quantity") if parsed_data.get("quantity") is not None else 1.0),
                 "factor": float(fact_val),
                 "formula": form_val,
                 "subtotal": float(part.get("calculated_value") or 0.0)
@@ -1445,6 +1471,36 @@ def get_dashboard_summary(username: str = "demo_user", db: Session = Depends(get
             "error": f"Database query error: {str(e)}"
         }
 
+# GET /analytics
+@router.get("/analytics")
+def get_analytics_dashboard_data(username: str = "demo_user", db: Session = Depends(get_db)):
+    """
+    Retrieves the comprehensive Analytics Engine calculations for CarbonTracker.
+    """
+    try:
+        user = get_or_create_user(db, username)
+        
+        # Fetch all user activities in the last 60 days to compute analytics and trends
+        sixty_days_ago = datetime.utcnow() - timedelta(days=60)
+        activities = db.query(Activity).filter(
+            Activity.user_id == user.id,
+            Activity.logged_at >= sixty_days_ago
+        ).all()
+        
+        from app.analytics.analytics_service import generate_analytics_payload
+        payload = generate_analytics_payload(activities)
+        
+        return {
+            "status": "success",
+            "data": payload
+        }
+    except Exception as e:
+        logger.error(f"Failed to generate analytics payload: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal analytics engine calculation error: {str(e)}"
+        )
+
 # GET /insights
 @router.get("/insights")
 def read_insights(request: Request, username: str = "demo_user", db: Session = Depends(get_db)):
@@ -1862,15 +1918,20 @@ def get_habit_analysis(
     """
     Exposes a lightweight habit analysis calculation endpoint.
     """
-    return {
-        "success": True,
-        "data": {
-            "habits": [],
-            "insights": [],
-            "recommendations": [],
-            "status": "temporarily_unavailable"
-        }
-    }
+    from app.habit_analysis.habit_analysis_service import analyze_user_habits
+    
+    # 1. Fetch user
+    user = get_or_create_user(db, username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    # 2. Fetch user's activities
+    activities = safe_query_all(db.query(Activity).filter(Activity.user_id == user.id))
+    
+    # 3. Analyze habits
+    analysis = analyze_user_habits(activities, username)
+    
+    return analysis
 
 # ---------------------------------------------------------------------------
 # PHASE B — ENTITY EXTRACTION ENDPOINTS
@@ -1895,7 +1956,7 @@ def api_extract_entities_get(
     # Check for error/fallback
     is_error = False
     if isinstance(res, list):
-        if not res or any(r.get("entity") == "unknown" for r in res):
+        if not res or all(r.get("entity") == "unknown" for r in res):
             is_error = True
     else:
         if not res or res.get("entity") == "unknown" or res.get("confidence", 0.0) < 0.90:
@@ -1920,7 +1981,7 @@ def api_extract_entities_get(
             intent_detected = r.get("intent") or r.get("category") or intent_detected
             standard_entities.append({
                 "entity": r.get("entity") or "unknown",
-                "quantity": float(r.get("quantity") or 1.0),
+                "quantity": float(r.get("quantity") if r.get("quantity") is not None else 1.0),
                 "factor": float(r.get("factor") or 0.0),
                 "formula": r.get("formula") or f"{r.get('quantity', 1.0)} x {r.get('factor', 0.0)}",
                 "subtotal": float(r.get("calculated_value") or 0.0)
@@ -1929,7 +1990,7 @@ def api_extract_entities_get(
         intent_detected = res.get("intent") or res.get("category") or intent_detected
         standard_entities.append({
             "entity": res.get("entity") or "unknown",
-            "quantity": float(res.get("quantity") or 1.0),
+            "quantity": float(res.get("quantity") if res.get("quantity") is not None else 1.0),
             "factor": float(res.get("factor") or 0.0),
             "formula": res.get("formula") or f"{res.get('quantity', 1.0)} x {res.get('factor', 0.0)}",
             "subtotal": float(res.get("calculated_value") or 0.0)
@@ -1960,7 +2021,7 @@ def api_extract_entities_post(payload: EntityExtractRequest):
     # Check for error/fallback
     is_error = False
     if isinstance(res, list):
-        if not res or any(r.get("entity") == "unknown" for r in res):
+        if not res or all(r.get("entity") == "unknown" for r in res):
             is_error = True
     else:
         if not res or res.get("entity") == "unknown" or res.get("confidence", 0.0) < 0.90:
@@ -1985,7 +2046,7 @@ def api_extract_entities_post(payload: EntityExtractRequest):
             intent_detected = r.get("intent") or r.get("category") or intent_detected
             standard_entities.append({
                 "entity": r.get("entity") or "unknown",
-                "quantity": float(r.get("quantity") or 1.0),
+                "quantity": float(r.get("quantity") if r.get("quantity") is not None else 1.0),
                 "factor": float(r.get("factor") or 0.0),
                 "formula": r.get("formula") or f"{r.get('quantity', 1.0)} x {r.get('factor', 0.0)}",
                 "subtotal": float(r.get("calculated_value") or 0.0)
@@ -1994,7 +2055,7 @@ def api_extract_entities_post(payload: EntityExtractRequest):
         intent_detected = res.get("intent") or res.get("category") or intent_detected
         standard_entities.append({
             "entity": res.get("entity") or "unknown",
-            "quantity": float(res.get("quantity") or 1.0),
+            "quantity": float(res.get("quantity") if res.get("quantity") is not None else 1.0),
             "factor": float(res.get("factor") or 0.0),
             "formula": res.get("formula") or f"{res.get('quantity', 1.0)} x {res.get('factor', 0.0)}",
             "subtotal": float(res.get("calculated_value") or 0.0)

@@ -955,15 +955,8 @@ def parse_compound_activity(text: str) -> List[Dict[str, Any]]:
             else:
                 parsed["activity"] = None
 
-        # Keep this segment if:
-        #  - there is only one part (always keep), OR
-        #  - it resolved to a real category (not lifestyle), OR
-        #  - confidence is reasonable (> 0.30)
-        keep = (
-            len(parts) == 1
-            or parsed["category"] != "lifestyle"
-            or parsed["confidence"] > 0.30
-        )
+        # Keep all segments to preserve unknown entities in multi-activity contexts
+        keep = True
         if keep:
             results.append(parsed)
 

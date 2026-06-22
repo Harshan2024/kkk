@@ -32,6 +32,7 @@ import {
   AIInsight,
   Achievement,
   SystemHealth,
+  AnalyticsPayload,
 } from "../services/api";
 import logger from "../utils/logger";
 
@@ -81,6 +82,12 @@ interface AIContextProps {
   // System health
   systemHealth: SystemHealth | null;
   fetchSystemHealth: () => Promise<void>;
+  forecastEnabled: boolean;
+
+  // Analytics
+  analyticsData: AnalyticsPayload | null;
+  analyticsLoading: boolean;
+  fetchAnalytics: () => Promise<void>;
 }
 
 export const AIContext = createContext<AIContextProps | undefined>(undefined);
@@ -128,6 +135,25 @@ export function AIStoreProvider({
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
+  const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
+
+  // Analytics State
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsPayload | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+
+  const forecastEnabled = useMemo(() => {
+    const envVal = process.env.NEXT_PUBLIC_FORECAST_ENABLED;
+    if (envVal !== undefined) {
+      return envVal === "true" || envVal === "1";
+    }
+    if (featureFlags.FORECAST_ENABLED !== undefined) {
+      return featureFlags.FORECAST_ENABLED;
+    }
+    if (featureFlags.enable_forecasting !== undefined) {
+      return featureFlags.enable_forecasting;
+    }
+    return false;
+  }, [featureFlags]);
 
   // Unmount abort controller
   const abortRef = useRef<AbortController | null>(null);
@@ -394,20 +420,35 @@ export function AIStoreProvider({
 
   const fetchForecast = useCallback(
     async (model = "prophet", steps = 30, generate = false) => {
+      if (!forecastEnabled) {
+        logger.info("aiStore", "Forecast is disabled via feature flag, skipping request");
+        setForecastData([]);
+        setForecastStatus("disabled");
+        return;
+      }
       setForecastLoading(true);
       try {
         const res = await api.getForecast(username, steps, model, generate);
         setForecastData(res.data ?? []);
         setForecastStatus(res.status ?? null);
-      } catch (err) {
-        logger.error("aiStore", "fetchForecast failed", err);
-        setForecastData([]);
-        setForecastStatus(null);
+      } catch (err: any) {
+        const isIntentionalDisable = 
+          err?.message?.includes("temporarily disabled") || 
+          err?.message?.includes("503");
+          
+        if (isIntentionalDisable) {
+          setForecastData([]);
+          setForecastStatus("disabled_intentionally");
+        } else {
+          logger.error("aiStore", "fetchForecast failed", err);
+          setForecastData([]);
+          setForecastStatus("error");
+        }
       } finally {
         setForecastLoading(false);
       }
     },
-    [username]
+    [username, forecastEnabled]
   );
 
   const fetchMetrics = useCallback(async () => {
@@ -519,6 +560,13 @@ export function AIStoreProvider({
       const health = await api.getSystemHealth();
       setSystemHealth(health);
       
+      try {
+        const flags = await api.getFeatureFlags();
+        setFeatureFlags(flags);
+      } catch (flagErr) {
+        logger.warn("aiStore", "fetchFeatureFlags failed", flagErr);
+      }
+      
       const currentDbStatus = health?.database || "online";
       const prevDbStatus = prevDbStatusRef.current;
       prevDbStatusRef.current = currentDbStatus;
@@ -544,6 +592,19 @@ export function AIStoreProvider({
       isSystemHealthLoadingRef.current = false;
     }
   }, [loadDashboardData]);
+
+  const fetchAnalytics = useCallback(async () => {
+    setAnalyticsLoading(true);
+    try {
+      const data = await api.getAnalytics(username);
+      setAnalyticsData(data ?? null);
+    } catch (err) {
+      logger.error("aiStore", "fetchAnalytics failed", err);
+      setToastError("Unable to load analytics dashboard data.");
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, [username]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // INITIAL LOAD + DEFERRED LOADING
@@ -643,6 +704,10 @@ export function AIStoreProvider({
       submitCorrection,
       systemHealth,
       fetchSystemHealth,
+      forecastEnabled,
+      analyticsData,
+      analyticsLoading,
+      fetchAnalytics,
     }),
     [
       summary, insights, insightsLoading, achievements, achievementsLoading,
@@ -651,7 +716,8 @@ export function AIStoreProvider({
       chatMessages, chatLoading, forecastData, forecastLoading, forecastStatus, metrics,
       metricsLoading, isRecording, transcript, fetchChatHistory,
       sendChatMessage, fetchForecast, fetchMetrics, uploadReceipt,
-      submitCorrection, systemHealth, fetchSystemHealth,
+      submitCorrection, systemHealth, fetchSystemHealth, forecastEnabled,
+      analyticsData, analyticsLoading, fetchAnalytics,
     ]
   );
 

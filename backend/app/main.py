@@ -381,7 +381,7 @@ def get_system_status():
         db_status = MOCK_STATUS_OVERRIDES["database"]
     else:
         if db_session.OFFLINE_MODE:
-            db_status = "degraded"
+            db_status = "offline_safe_mode"
         else:
             from app.database.session import check_database_health_throttled
             is_healthy = check_database_health_throttled()
@@ -392,14 +392,17 @@ def get_system_status():
                 db_status = "online"
             else:
                 db_session.READ_ONLY_MODE = True
-                db_status = "degraded"
+                db_status = "offline"
 
     elapsed_ms = (time.perf_counter() - t_start) * 1000.0
     print(f"DEBUG: get_system_status internal duration: {elapsed_ms:.4f}ms")
     return {
-        "backend": backend_status,
-        "database": db_status,
-        "version": "current"
+        "status": "success",
+        "data": {
+            "backend": backend_status,
+            "database": db_status,
+            "version": "current"
+        }
     }
 
 
