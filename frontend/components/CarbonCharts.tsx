@@ -144,16 +144,39 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
     );
   }
 
-  // 1. Map Category Breakdown Pie Chart data
-  const pieData = Object.entries(analyticsData.category_breakdown)
-    .filter(([_, value]) => value > 0)
+  const isAnalyticsEmpty = 
+    !analyticsData || 
+    ((analyticsData.daily?.activities ?? analyticsData.daily_summary?.activities ?? 0) === 0 &&
+     (analyticsData.weekly?.weekly_total ?? analyticsData.weekly_summary?.weekly_total ?? 0) === 0 &&
+     (analyticsData.monthly?.monthly_total ?? analyticsData.monthly_summary?.monthly_total ?? 0) === 0 &&
+     Object.values(analyticsData.category_breakdown ?? {}).every(v => v === 0));
+
+  if (isAnalyticsEmpty) {
+    return (
+      <div className="w-full flex flex-col items-center justify-center min-h-[400px] border border-dashed border-white/5 rounded-3xl bg-white/[0.01] p-6 text-center select-none">
+        <Leaf className="w-10 h-10 text-emerald-500/40 mb-3 animate-pulse" />
+        <span className="text-sm font-bold text-stone-300">
+          No analytics data available yet.
+        </span>
+        <p className="text-xs text-stone-500 mt-1">
+          Start logging activities.
+        </p>
+      </div>
+    );
+  }
+
+  // 1. Map Category Breakdown Pie Chart data safely
+  const pieData = Object.entries(
+    analyticsData?.category_breakdown ?? {}
+  )
+    .filter(([_, value]) => typeof value === "number" && value > 0)
     .map(([key, value]) => ({
       name: key.toUpperCase(),
-      value: value,
+      value: value as number,
       color: CATEGORY_COLORS[key] || "#10b981",
     }));
 
-  const trends = summary.trends ?? [];
+  const trends = summary?.trends ?? [];
   const showDegraded = dbStatus === "degraded" || aiStatus === "degraded";
 
   // Trend indicator builder helper
@@ -204,15 +227,15 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
               Today's Footprint
             </span>
             <div className="mt-2.5 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-white">{analyticsData.daily.total_carbon.toFixed(2)}</span>
+              <span className="text-2xl font-black text-white">{(analyticsData?.daily?.total_carbon ?? analyticsData?.daily_summary?.total_carbon ?? 0).toFixed(2)}</span>
               <span className="text-[10px] font-extrabold text-stone-400 uppercase">kg CO2e</span>
             </div>
           </div>
           <div className="mt-4 flex items-center justify-between border-t border-white/5 pt-2.5">
             <span className="text-[9px] font-bold text-stone-500">
-              {analyticsData.daily.activities} logs • Avg: {analyticsData.daily.average} kg
+              {analyticsData?.daily?.activities ?? analyticsData?.daily_summary?.activities ?? 0} logs • Avg: {analyticsData?.daily?.average ?? analyticsData?.daily_summary?.average ?? 0} kg
             </span>
-            {renderTrendBadge(analyticsData.daily.trend_value, analyticsData.daily.trend_status)}
+            {renderTrendBadge(analyticsData?.daily?.trend_value ?? 0, analyticsData?.daily?.trend_status ?? analyticsData?.trend?.status ?? "stable")}
           </div>
         </div>
 
@@ -220,19 +243,19 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
         <div className="glass-card rounded-3xl p-5 border border-white/5 bg-white/[0.01] hover:border-sky-500/10 transition-all duration-300 flex flex-col justify-between min-h-[120px]">
           <div>
             <span className="text-[10px] font-black uppercase tracking-widest text-stone-500 flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-sky-500" />
+              <Calendar className="w-3.5 h-3.5 text-sky-550" />
               Weekly Footprint
             </span>
             <div className="mt-2.5 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-white">{analyticsData.weekly.weekly_total.toFixed(2)}</span>
+              <span className="text-2xl font-black text-white">{(analyticsData?.weekly?.weekly_total ?? analyticsData?.weekly_summary?.weekly_total ?? 0).toFixed(2)}</span>
               <span className="text-[10px] font-extrabold text-sky-400 uppercase">kg CO2e</span>
             </div>
           </div>
           <div className="mt-4 flex items-center justify-between border-t border-white/5 pt-2.5">
             <span className="text-[9px] font-bold text-stone-500">
-              Daily Avg: {analyticsData.weekly.daily_average} kg
+              Daily Avg: {analyticsData?.weekly?.daily_average ?? 0} kg
             </span>
-            {renderTrendBadge(analyticsData.weekly.trend_value, analyticsData.weekly.trend_status)}
+            {renderTrendBadge(analyticsData?.weekly?.trend_value ?? 0, analyticsData?.weekly?.trend_status ?? "stable")}
           </div>
         </div>
 
@@ -244,15 +267,15 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
               Monthly Footprint
             </span>
             <div className="mt-2.5 flex items-baseline gap-1.5">
-              <span className="text-2xl font-black text-white">{analyticsData.monthly.monthly_total.toFixed(2)}</span>
+              <span className="text-2xl font-black text-white">{(analyticsData?.monthly?.monthly_total ?? analyticsData?.monthly_summary?.monthly_total ?? 0).toFixed(2)}</span>
               <span className="text-[10px] font-extrabold text-amber-500 uppercase">kg CO2e</span>
             </div>
           </div>
           <div className="mt-4 flex items-center justify-between border-t border-white/5 pt-2.5">
             <span className="text-[9px] font-bold text-stone-500">
-              Daily Avg: {analyticsData.monthly.daily_average} kg
+              Daily Avg: {analyticsData?.monthly?.daily_average ?? 0} kg
             </span>
-            {renderTrendBadge(analyticsData.monthly.trend_value, analyticsData.monthly.trend_status)}
+            {renderTrendBadge(analyticsData?.monthly?.trend_value ?? 0, analyticsData?.monthly?.trend_status ?? "stable")}
           </div>
         </div>
 
@@ -264,10 +287,10 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
               Sustainability Rating
             </span>
             <div className="mt-2.5 flex items-center gap-3">
-              <span className="text-2xl font-black text-white">{analyticsData.sustainability.score}</span>
+              <span className="text-2xl font-black text-white">{analyticsData?.sustainability?.score ?? analyticsData?.sustainability_score?.score ?? 0}</span>
               <span className="text-[9px] font-extrabold text-stone-400 uppercase">Score</span>
-              <span className={`px-2 py-0.5 rounded-lg border text-xs font-black uppercase tracking-wide ml-auto ${getGradeColor(analyticsData.sustainability.grade)}`}>
-                Grade {analyticsData.sustainability.grade}
+              <span className={`px-2 py-0.5 rounded-lg border text-xs font-black uppercase tracking-wide ml-auto ${getGradeColor(analyticsData?.sustainability?.grade ?? analyticsData?.sustainability_score?.grade ?? "N/A")}`}>
+                Grade {analyticsData?.sustainability?.grade ?? analyticsData?.sustainability_score?.grade ?? "N/A"}
               </span>
             </div>
           </div>
@@ -594,9 +617,9 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
               <h4 className="text-[10px] font-black uppercase tracking-widest text-stone-400 mb-2.5">
                 Top Carbon Sources
               </h4>
-              {analyticsData.rankings.top_sources.length > 0 ? (
+              {(analyticsData?.rankings?.top_sources ?? []).length > 0 ? (
                 <div className="space-y-3">
-                  {analyticsData.rankings.top_sources.map((item, idx) => (
+                  {(analyticsData?.rankings?.top_sources ?? []).map((item, idx) => (
                     <div key={idx} className="space-y-1">
                       <div className="flex justify-between text-xs font-bold text-stone-300">
                         <span className="truncate max-w-[130px]">{item.activity}</span>
@@ -609,7 +632,7 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
                           style={{
                             width: `${Math.min(
                               100,
-                              (item.carbon / (analyticsData.rankings.top_sources[0]?.carbon || 1)) * 100
+                              (item.carbon / ((analyticsData?.rankings?.top_sources ?? [])[0]?.carbon || 1)) * 100
                             )}%`,
                           }}
                         />
@@ -627,9 +650,9 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
               <h4 className="text-[10px] font-black uppercase tracking-widest text-stone-400 mb-2.5">
                 Most Frequent Activities
               </h4>
-              {analyticsData.rankings.most_frequent.length > 0 ? (
+              {(analyticsData?.rankings?.most_frequent ?? []).length > 0 ? (
                 <div className="space-y-2.5">
-                  {analyticsData.rankings.most_frequent.map((item, idx) => (
+                  {(analyticsData?.rankings?.most_frequent ?? []).map((item, idx) => (
                     <div key={idx} className="flex justify-between items-center bg-white/[0.02] border border-white/5 px-3 py-2 rounded-xl text-xs">
                       <span className="font-bold text-stone-350 truncate max-w-[120px]">{item.activity}</span>
                       <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/10 text-[9px] font-black uppercase tracking-wider">
@@ -659,7 +682,7 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
             </div>
 
             <div className="space-y-3.5">
-              {analyticsData.recommendations.map((rec, idx) => (
+              {(analyticsData?.recommendations ?? []).map((rec, idx) => (
                 <div key={idx} className="flex items-start gap-3 bg-emerald-950/5 border border-emerald-550/10 p-3.5 rounded-2xl">
                   <span className="w-6 h-6 rounded-lg bg-emerald-500/15 flex items-center justify-center border border-emerald-500/20 mt-0.5">
                     <Leaf className="w-3.5 h-3.5 text-emerald-400" />

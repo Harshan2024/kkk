@@ -35,11 +35,11 @@ def calculate_category_breakdown(activities: list) -> dict:
         # Ensure exact 100% total by adjusting the remaining slice (waste)
         waste_pct = 100 - (transport_pct + food_pct + energy_pct)
     else:
-        # Default even distribution when there is no carbon data logged yet
-        transport_pct = 25
-        food_pct = 25
-        energy_pct = 25
-        waste_pct = 25
+        # Default zero distribution when there is no carbon data logged yet
+        transport_pct = 0
+        food_pct = 0
+        energy_pct = 0
+        waste_pct = 0
         
     return {
         "transport": transport_pct,

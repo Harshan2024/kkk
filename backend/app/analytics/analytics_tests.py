@@ -68,6 +68,13 @@ class TestAnalyticsEngine(unittest.TestCase):
         self.assertIn("energy", breakdown)
         self.assertIn("waste", breakdown)
 
+    def test_category_breakdown_empty(self):
+        breakdown = calculate_category_breakdown([])
+        self.assertEqual(breakdown["transport"], 0)
+        self.assertEqual(breakdown["food"], 0)
+        self.assertEqual(breakdown["energy"], 0)
+        self.assertEqual(breakdown["waste"], 0)
+
     def test_sustainability_score_and_grade(self):
         # High emissions
         score_high = calculate_sustainability_score(self.activities, daily_average=10.0, category_breakdown={"transport": 50, "food": 20, "energy": 20, "waste": 10})

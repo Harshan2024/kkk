@@ -56,7 +56,13 @@ export default function DashboardStats({ summary, xp = 150, level = 1 }: Dashboa
   }
 
   const showDegraded = dbStatus === "degraded";
-  const { today_emissions, yesterday_emissions, weekly_emissions, current_score, trends } = summary;
+  const {
+    today_emissions = 0,
+    yesterday_emissions = 0,
+    weekly_emissions = 0,
+    current_score = 0,
+    trends = []
+  } = summary ?? {};
 
   // Calculate percentage change today vs yesterday
   const getCarbonTrend = () => {

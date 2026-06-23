@@ -262,6 +262,27 @@ export interface AnalyticsPayload {
     grade: string;
   };
   recommendations: string[];
+
+  // Extensions to support alternative structures and hotfix keys
+  daily_summary: {
+    total_carbon: number;
+    activities: number;
+    average: number;
+  };
+  weekly_summary: {
+    weekly_total: number;
+  };
+  monthly_summary: {
+    monthly_total: number;
+  };
+  sustainability_score: {
+    score: number;
+    grade: string;
+  };
+  trend: {
+    status: string;
+  };
+  total_carbon: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -367,6 +388,139 @@ async function withRetry<T>(
     }
   }
   throw lastErr;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEFAULT ANALYTICS FALLBACKS & NORMALIZERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const DEFAULT_ANALYTICS: AnalyticsPayload = {
+  daily: {
+    date: "today",
+    activities: 0,
+    total_carbon: 0,
+    average: 0,
+    highest_activity: "",
+    highest_carbon: 0,
+    trend_value: 0,
+    trend_status: "stable"
+  },
+  weekly: {
+    weekly_total: 0,
+    daily_average: 0,
+    highest_day: "N/A",
+    highest_emission: 0,
+    trend_value: 0,
+    trend_status: "stable"
+  },
+  monthly: {
+    monthly_total: 0,
+    daily_average: 0,
+    trend_value: 0,
+    trend_status: "stable"
+  },
+  category_breakdown: {
+    transport: 0,
+    food: 0,
+    energy: 0,
+    waste: 0
+  },
+  rankings: {
+    top_sources: [],
+    bottom_sources: [],
+    most_frequent: []
+  },
+  sustainability: {
+    score: 0,
+    grade: "N/A"
+  },
+
+  // Requested format
+  daily_summary: {
+    total_carbon: 0,
+    activities: 0,
+    average: 0
+  },
+  weekly_summary: {
+    weekly_total: 0
+  },
+  monthly_summary: {
+    monthly_total: 0
+  },
+  sustainability_score: {
+    score: 0,
+    grade: "N/A"
+  },
+  recommendations: [],
+  trend: {
+    status: "stable"
+  },
+  total_carbon: 0
+};
+
+export function normalizeAnalytics(data: any): AnalyticsPayload {
+  if (!data || typeof data !== "object") {
+    return DEFAULT_ANALYTICS;
+  }
+  
+  const daily = data.daily || {};
+  const weekly = data.weekly || {};
+  const monthly = data.monthly || {};
+  const category_breakdown = data.category_breakdown || {};
+  const rankings = data.rankings || {};
+  const sustainability = data.sustainability || {};
+  const recommendations = data.recommendations || [];
+
+  return {
+    ...DEFAULT_ANALYTICS,
+    ...data,
+    daily: {
+      ...DEFAULT_ANALYTICS.daily,
+      ...daily
+    },
+    weekly: {
+      ...DEFAULT_ANALYTICS.weekly,
+      ...weekly
+    },
+    monthly: {
+      ...DEFAULT_ANALYTICS.monthly,
+      ...monthly
+    },
+    category_breakdown: {
+      ...DEFAULT_ANALYTICS.category_breakdown,
+      ...category_breakdown
+    },
+    rankings: {
+      ...DEFAULT_ANALYTICS.rankings,
+      ...rankings
+    },
+    sustainability: {
+      ...DEFAULT_ANALYTICS.sustainability,
+      ...sustainability
+    },
+    recommendations: Array.isArray(recommendations) ? recommendations : [],
+    
+    // Map to requested keys for double safety
+    daily_summary: {
+      total_carbon: typeof daily.total_carbon === "number" ? daily.total_carbon : 0,
+      activities: typeof daily.activities === "number" ? daily.activities : 0,
+      average: typeof daily.average === "number" ? daily.average : 0
+    },
+    weekly_summary: {
+      weekly_total: typeof weekly.weekly_total === "number" ? weekly.weekly_total : 0
+    },
+    monthly_summary: {
+      monthly_total: typeof monthly.monthly_total === "number" ? monthly.monthly_total : 0
+    },
+    sustainability_score: {
+      score: typeof sustainability.score === "number" ? sustainability.score : 0,
+      grade: sustainability.grade || "N/A"
+    },
+    trend: {
+      status: daily.trend_status || weekly.trend_status || monthly.trend_status || "stable"
+    },
+    total_carbon: typeof daily.total_carbon === "number" ? daily.total_carbon : 0
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -535,7 +689,13 @@ class ApiService {
   }
 
   async getAnalytics(username = "demo_user"): Promise<AnalyticsPayload> {
-    return this.request<AnalyticsPayload>(`/analytics?username=${username}`);
+    try {
+      const data = await this.request<any>(`/analytics?username=${username}`);
+      return normalizeAnalytics(data);
+    } catch (err) {
+      logger.warn("ApiService", "getAnalytics failed, returning DEFAULT_ANALYTICS", err);
+      return DEFAULT_ANALYTICS;
+    }
   }
 
   async correctActivity(

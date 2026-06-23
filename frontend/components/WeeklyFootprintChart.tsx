@@ -53,7 +53,7 @@ export default function WeeklyFootprintChart({ summary }: WeeklyFootprintChartPr
     );
   }
 
-  const { trends } = summary;
+  const { trends = [] } = summary ?? {};
 
   // If trends array is empty or short, we pad it with default values for mockup aesthetic
   const formattedTrends = trends && trends.length > 0 ? trends : [

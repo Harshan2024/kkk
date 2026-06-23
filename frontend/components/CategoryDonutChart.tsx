@@ -55,11 +55,11 @@ export default function CategoryDonutChart({ summary }: CategoryDonutChartProps)
     );
   }
 
-  const { breakdown } = summary;
+  const { breakdown = [] } = summary ?? {};
 
   // Filter and map breakdown categories
-  let pieData = breakdown
-    .filter((cat) => cat.total_carbon > 0)
+  let pieData = (breakdown ?? [])
+    .filter((cat) => cat && typeof cat.total_carbon === "number" && cat.total_carbon > 0)
     .map((cat) => {
       const safe = getSafeCategory(cat.category);
       // Map names to match standard labels if needed

@@ -33,6 +33,7 @@ import {
   Achievement,
   SystemHealth,
   AnalyticsPayload,
+  DEFAULT_ANALYTICS,
 } from "../services/api";
 import logger from "../utils/logger";
 
@@ -597,9 +598,10 @@ export function AIStoreProvider({
     setAnalyticsLoading(true);
     try {
       const data = await api.getAnalytics(username);
-      setAnalyticsData(data ?? null);
+      setAnalyticsData(data ?? DEFAULT_ANALYTICS);
     } catch (err) {
       logger.error("aiStore", "fetchAnalytics failed", err);
+      setAnalyticsData(DEFAULT_ANALYTICS);
       setToastError("Unable to load analytics dashboard data.");
     } finally {
       setAnalyticsLoading(false);
