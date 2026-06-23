@@ -11,9 +11,10 @@ interface DashboardStatsProps {
   summary: DashboardSummary | null;
   xp?: number;
   level?: number;
+  score?: number;
 }
 
-export default function DashboardStats({ summary, xp = 150, level = 1 }: DashboardStatsProps) {
+export default function DashboardStats({ summary, xp = 150, level = 1, score }: DashboardStatsProps) {
   const { systemHealth } = useAIStore();
   const dbStatus = systemHealth?.database;
 
@@ -64,6 +65,8 @@ export default function DashboardStats({ summary, xp = 150, level = 1 }: Dashboa
     trends = []
   } = summary ?? {};
 
+  const finalScore = score !== undefined ? score : current_score;
+
   // Calculate percentage change today vs yesterday
   const getCarbonTrend = () => {
     if (yesterday_emissions === 0) return { pct: 0, improved: true };
@@ -109,7 +112,7 @@ export default function DashboardStats({ summary, xp = 150, level = 1 }: Dashboa
   const radius = 12;
   const strokeWidth = 2.5;
   const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (Math.min(100, Math.max(0, current_score)) / 100) * circumference;
+  const strokeDashoffset = circumference - (Math.min(100, Math.max(0, finalScore)) / 100) * circumference;
 
   // XP level parameters
   const LEVEL_NAMES = [
@@ -143,7 +146,7 @@ export default function DashboardStats({ summary, xp = 150, level = 1 }: Dashboa
 
   // Extract emissions trend array for sparklines
   const emissionsHistory = trends ? trends.map(t => t.emissions) : [0.5, 0.8, 0.4, today_emissions];
-  const scoreHistory = trends ? trends.map(t => t.score) : [90, 85, 93, current_score];
+  const scoreHistory = trends ? trends.map(t => t.score) : [90, 85, 93, finalScore];
 
   return (
     <div className="relative w-full">
@@ -193,7 +196,7 @@ export default function DashboardStats({ summary, xp = 150, level = 1 }: Dashboa
                 Sustainability Score
               </span>
               <div className="text-2xl font-black text-emerald-400 leading-none mt-1.5 font-sans">
-                {current_score.toFixed(0)}<span className="text-xs text-stone-500 font-normal">/100</span>
+                {finalScore.toFixed(0)}<span className="text-xs text-stone-500 font-normal">/100</span>
               </div>
             </div>
 

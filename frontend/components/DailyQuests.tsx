@@ -1,35 +1,47 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Trophy, Bike, Plug, Leaf, Recycle, ChevronRight, Check } from "lucide-react";
 import { motion } from "framer-motion";
-import { useAIStore } from "../stores/aiStore";
-
-interface Quest {
-  id: string;
-  name: string;
-  description: string;
-  progress: number;
-  max: number;
-  xp: number;
-  icon: any;
-  color: string;
-}
+import api, { ChallengeProgress } from "../services/api";
 
 const ICON_MAP: Record<string, any> = {
   Bike: Bike,
   Plug: Plug,
   Leaf: Leaf,
   Recycle: Recycle,
+  Trophy: Trophy,
 };
 
 export default function DailyQuests() {
-  const { summary } = useAIStore();
+  const [challenges, setChallenges] = useState<{ daily: ChallengeProgress[]; weekly: ChallengeProgress[] }>({ daily: [], weekly: [] });
+  const [isLoading, setIsLoading] = useState(true);
 
-  const quests: Quest[] = summary?.quests?.map((q) => ({
-    ...q,
-    icon: ICON_MAP[q.icon] || Leaf
-  })) || [
+  const fetchChallenges = async () => {
+    try {
+      const data = await api.getGamificationChallenges();
+      if (data) {
+        setChallenges(data);
+      }
+    } catch (err) {
+      console.error("Failed to load live quests", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchChallenges();
+  }, []);
+
+  // Merge daily and weekly challenges, mapping icons dynamically
+  const quests = [
+    ...(challenges.daily || []).map(q => ({ ...q, type: "Daily", icon: ICON_MAP[q.icon] || Leaf })),
+    ...(challenges.weekly || []).map(q => ({ ...q, type: "Weekly", icon: ICON_MAP[q.icon] || Trophy }))
+  ];
+
+  // If loading or API returns empty, use static fallback quests for visual excellence
+  const displayQuests = quests.length > 0 ? quests : [
     {
       id: "q1",
       name: "The Velocity Shift",
@@ -38,7 +50,9 @@ export default function DailyQuests() {
       max: 5,
       xp: 150,
       icon: Bike,
-      color: "text-emerald-450 bg-emerald-500/10 border-emerald-500/20"
+      color: "text-emerald-450 bg-emerald-500/10 border-emerald-500/20",
+      completed: false,
+      type: "Daily"
     },
     {
       id: "q2",
@@ -48,7 +62,9 @@ export default function DailyQuests() {
       max: 3,
       xp: 120,
       icon: Plug,
-      color: "text-indigo-400 bg-indigo-500/10 border-indigo-500/20"
+      color: "text-indigo-400 bg-indigo-500/10 border-indigo-500/20",
+      completed: false,
+      type: "Daily"
     },
     {
       id: "q3",
@@ -58,23 +74,11 @@ export default function DailyQuests() {
       max: 1,
       xp: 100,
       icon: Leaf,
-      color: "text-emerald-400 bg-emerald-500/15 border-emerald-500/30"
-    },
-    {
-      id: "q4",
-      name: "Zero Plastic Hero",
-      description: "Avoid single-use plastics today.",
-      progress: 0,
-      max: 1,
-      xp: 80,
-      icon: Recycle,
-      color: "text-emerald-550 bg-emerald-600/10 border-emerald-500/10"
+      color: "text-emerald-400 bg-emerald-500/15 border-emerald-500/30",
+      completed: true,
+      type: "Daily"
     }
   ];
-
-  const overallProgress = quests.length > 0 
-    ? quests.reduce((acc, curr) => acc + (curr.progress / curr.max), 0) / quests.length
-    : 0;
 
   return (
     <div className="glass-card rounded-3xl p-5 sm:p-6 transition-all duration-300 flex flex-col justify-between h-[360px] select-none">
@@ -86,24 +90,24 @@ export default function DailyQuests() {
               <Trophy className="w-3.5 h-3.5 text-amber-500" />
             </div>
             <h3 className="font-extrabold text-xs text-stone-300 uppercase tracking-widest">
-              Daily Eco-Quests
+              Live Challenges & Quests
             </h3>
           </div>
-          <button className="text-[10px] text-emerald-400 hover:text-emerald-350 font-extrabold uppercase transition-colors">
-            View All
-          </button>
+          <span className="text-[9px] font-black uppercase text-stone-500 tracking-wider">
+            Active
+          </span>
         </div>
 
         {/* Quests List */}
         <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-          {quests.map((quest) => {
+          {displayQuests.map((quest) => {
             const Icon = quest.icon;
-            const isCompleted = quest.progress === quest.max;
+            const isCompleted = quest.completed || quest.progress >= quest.max;
             
             return (
               <motion.div
                 key={quest.id}
-                whileHover={{ x: 3 }}
+                whileHover={{ x: 2 }}
                 className={`flex items-center justify-between p-2 rounded-2xl border transition-all duration-300 ${
                   isCompleted 
                     ? "bg-emerald-950/10 border-emerald-500/20 text-stone-400 opacity-75"
@@ -113,13 +117,20 @@ export default function DailyQuests() {
                 {/* Left Side: Icon & Details */}
                 <div className="flex items-center space-x-3 min-w-0 flex-1">
                   {/* Icon */}
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center border flex-shrink-0 ${quest.color}`}>
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center border flex-shrink-0 ${
+                    isCompleted ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" : quest.color
+                  }`}>
                     <Icon className="w-4 h-4" />
                   </div>
                   
                   {/* Text Details */}
-                  <div className="min-w-0 pr-1.5">
-                    <h4 className="text-[11px] font-black text-white truncate">{quest.name}</h4>
+                  <div className="min-w-0 pr-1.5 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <h4 className="text-[11px] font-black text-white truncate">{quest.name}</h4>
+                      <span className="text-[7px] font-extrabold px-1.5 py-0.5 rounded bg-white/5 text-stone-500 uppercase tracking-wider">
+                        {quest.type}
+                      </span>
+                    </div>
                     <p className="text-[9px] text-stone-500 font-bold truncate mt-0.5 leading-tight">{quest.description}</p>
                     
                     {/* Linear Progress bar */}
@@ -148,7 +159,6 @@ export default function DailyQuests() {
                       <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
                         +{quest.xp} XP
                       </span>
-                      <ChevronRight className="w-3.5 h-3.5 text-stone-605" />
                     </div>
                   )}
                 </div>
@@ -159,10 +169,10 @@ export default function DailyQuests() {
       </div>
 
       {/* Complete bonus notifier button */}
-      <button className="w-full py-2 bg-gradient-to-r from-emerald-950/40 to-emerald-900/20 border border-emerald-500/10 rounded-xl text-[10px] font-extrabold uppercase text-emerald-400 hover:text-emerald-350 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
-        <span>Complete all quests to earn bonus 200 XP!</span>
-        <span>🎁</span>
-      </button>
+      <div className="w-full py-2 bg-gradient-to-r from-emerald-950/40 to-emerald-900/20 border border-emerald-500/10 rounded-xl text-[10px] font-extrabold uppercase text-emerald-400 flex items-center justify-center gap-1.5">
+        <span>Dynamic Challenges automatically sync from logs!</span>
+        <span>⚡</span>
+      </div>
     </div>
   );
 }

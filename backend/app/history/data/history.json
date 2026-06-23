@@ -1,0 +1,109 @@
+[
+  {
+    "id": "9c2f0de7-86ad-4530-92ba-da812fc6b583",
+    "timestamp": "2026-06-23T10:15:00",
+    "activities": [
+      {
+        "name": "Electric Train",
+        "category": "transport",
+        "quantity": 25.0,
+        "unit": "km",
+        "factor": 0.02,
+        "carbon": 0.5,
+        "formula": "25.0 * 0.02",
+        "subtotal": 0.5
+      },
+      {
+        "name": "Chicken Biriyani",
+        "category": "food",
+        "quantity": 2.0,
+        "unit": "portion",
+        "factor": 2.5,
+        "carbon": 5.0,
+        "formula": "2.0 * 2.5",
+        "subtotal": 5.0
+      }
+    ],
+    "source": "manual",
+    "total_carbon": 5.5,
+    "categories": [
+      "food",
+      "transport"
+    ]
+  },
+  {
+    "id": "79dd78ee-ecb2-416b-a2a9-9a4e6123a19d",
+    "timestamp": "2026-06-23T10:15:00",
+    "activities": [
+      {
+        "name": "Electric Train",
+        "category": "transport",
+        "quantity": 25.0,
+        "unit": "km",
+        "factor": 0.02,
+        "carbon": 0.5,
+        "formula": "25.0 * 0.02",
+        "subtotal": 0.5
+      },
+      {
+        "name": "Chicken Biriyani",
+        "category": "food",
+        "quantity": 2.0,
+        "unit": "portion",
+        "factor": 2.5,
+        "carbon": 5.0,
+        "formula": "2.0 * 2.5",
+        "subtotal": 5.0
+      }
+    ],
+    "source": "manual",
+    "total_carbon": 5.5,
+    "categories": [
+      "food",
+      "transport"
+    ]
+  },
+  {
+    "id": "9425fd8e-4e67-4d6f-a0ec-3222532c71c2",
+    "timestamp": "2026-06-23T10:15:00",
+    "activities": [
+      {
+        "name": "AC 1500W",
+        "category": "energy",
+        "quantity": 5.0,
+        "unit": "hours",
+        "factor": 1.23,
+        "carbon": 6.15,
+        "formula": "5.0 * 1.23",
+        "subtotal": 6.15
+      },
+      {
+        "name": "Chicken Biriyani",
+        "category": "food",
+        "quantity": 2.0,
+        "unit": "portions",
+        "factor": 2.5,
+        "carbon": 5.0,
+        "formula": "2.0 * 2.5",
+        "subtotal": 5.0
+      },
+      {
+        "name": "Petrol Car",
+        "category": "transport",
+        "quantity": 10.0,
+        "unit": "km",
+        "factor": 0.2,
+        "carbon": 2.0,
+        "formula": "10.0 * 0.2",
+        "subtotal": 2.0
+      }
+    ],
+    "source": "manual",
+    "total_carbon": 13.15,
+    "categories": [
+      "energy",
+      "food",
+      "transport"
+    ]
+  }
+]

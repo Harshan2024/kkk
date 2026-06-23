@@ -106,7 +106,7 @@ export default function Navbar({ onRefresh, region, onRegionChange }: NavbarProp
           </div>
 
           <button
-            onClick={handleSeed}
+            onClick={() => handleSeed(false)}
             disabled={seeding}
             className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold border transition-all duration-300 ${
               seeded

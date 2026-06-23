@@ -124,11 +124,23 @@ app = FastAPI(
 )
 
 # Register global FastAPI exception handler directly
-from fastapi import Request
+from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from app.utils.logger import log_structured, request_id_var
 from app.utils.rate_limiter import RateLimitExceeded
 from app.utils.safe_db import DatabaseUnavailableException
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "error": exc.detail,
+            "message": exc.detail,
+            "request_id": request_id_var.get()
+        }
+    )
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):

@@ -581,10 +581,10 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
                   <div
                     key={day.date_full}
                     className="flex-1 flex flex-col items-center p-1.5 sm:p-2 rounded-xl border border-white/5 bg-white/5"
-                    title={`${day.date_full}: ${day.emissions.toFixed(2)} kg CO2e, Score: ${day.score.toFixed(0)}`}
+                    title={`${day.date_full}: ${(day.emissions ?? 0.0).toFixed(2)} kg CO2e, Score: ${(day.score ?? 0.0).toFixed(0)}`}
                   >
                     <div className={`w-full aspect-square rounded-lg border ${getGridColor(day.score)} flex items-center justify-center text-[10px] font-bold text-white shadow-sm`}>
-                      {day.score.toFixed(0)}
+                      {(day.score ?? 0.0).toFixed(0)}
                     </div>
                     <span className="text-[10px] text-stone-400 mt-1 font-bold">{day.date}</span>
                   </div>
@@ -623,7 +623,7 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
                     <div key={idx} className="space-y-1">
                       <div className="flex justify-between text-xs font-bold text-stone-300">
                         <span className="truncate max-w-[130px]">{item.activity}</span>
-                        <span className="text-white font-extrabold">{item.carbon.toFixed(1)} kg</span>
+                        <span className="text-white font-extrabold">{(item.carbon ?? 0.0).toFixed(1)} kg</span>
                       </div>
                       {/* Realistic Progress Bar */}
                       <div className="w-full h-1.5 rounded-full bg-white/5 overflow-hidden">
@@ -632,7 +632,7 @@ export default function CarbonCharts({ summary }: CarbonChartsProps) {
                           style={{
                             width: `${Math.min(
                               100,
-                              (item.carbon / ((analyticsData?.rankings?.top_sources ?? [])[0]?.carbon || 1)) * 100
+                              ((item.carbon ?? 0.0) / ((analyticsData?.rankings?.top_sources ?? [])[0]?.carbon || 1.0)) * 100.0
                             )}%`,
                           }}
                         />

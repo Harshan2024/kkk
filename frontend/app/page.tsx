@@ -18,6 +18,9 @@ import CarbonCharts from "../components/CarbonCharts";
 import AIRecommendations from "../components/AIRecommendations";
 import Achievements from "../components/Achievements";
 import ActivityHistory from "../components/ActivityHistory";
+import CoachDashboard from "../components/CoachDashboard";
+import Marketplace from "../components/Marketplace";
+import api, { GamificationProfile } from "../services/api";
 import dynamic from "next/dynamic";
 const CopilotChat = dynamic(() => import("../components/CopilotChat"), {
   loading: () => null,
@@ -108,6 +111,21 @@ function HomeContent() {
   const [currentTab, setCurrentTab] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
+  const [gamificationProfile, setGamificationProfile] = useState<GamificationProfile | null>(null);
+
+  const fetchGamificationProfile = useCallback(async () => {
+    try {
+      const profileData = await api.getGamificationProfile();
+      setGamificationProfile(profileData);
+      console.log("[CarbonTracker] Fetched gamification profile:", profileData);
+    } catch (err) {
+      console.error("Failed to fetch gamification profile", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchGamificationProfile();
+  }, [fetchGamificationProfile, activities?.length, currentTab]);
 
   useEffect(() => {
     const handleOpen = () => setIsCopilotOpen(true);
@@ -121,16 +139,25 @@ function HomeContent() {
     }
   }, [currentTab, fetchAnalytics]);
 
-  // Memoized gamification values — only recalculate when dependencies change
-  const { xp, level, streak } = useMemo(() => {
+  // Memoized gamification values — prefer backend profile, fallback to computed if null
+  const { xp, level, streak, score } = useMemo(() => {
+    if (gamificationProfile) {
+      return {
+        xp: gamificationProfile.total_xp,
+        level: gamificationProfile.level,
+        streak: gamificationProfile.streak,
+        score: gamificationProfile.sustainability_score
+      };
+    }
     const achievementsCount = summary?.achievements_count ?? achievements?.length ?? 0;
     const xpVal = summary?.xp ?? (150 + (activities?.length ?? 0) * 20 + achievementsCount * 100);
     const levelVal = summary?.level ?? (Math.floor(xpVal / 200) + 1);
     const streakVal = summary?.streaks?.current_streak ?? (summary?.trends
       ? Math.max(1, summary.trends.filter((t) => t.emissions > 0).length)
       : 1);
-    return { xp: xpVal, level: levelVal, streak: streakVal };
-  }, [summary, achievements, activities]);
+    const scoreVal = summary?.current_score ?? 0;
+    return { xp: xpVal, level: levelVal, streak: streakVal, score: scoreVal };
+  }, [gamificationProfile, summary, achievements, activities]);
 
   const handleTabChange = useCallback((tab: string) => setCurrentTab(tab), []);
 
@@ -276,7 +303,7 @@ function HomeContent() {
               {/* KPI Cards — isolated boundary */}
               <motion.div variants={itemVariants}>
                 <ErrorBoundary>
-                  <DashboardStats summary={summary} xp={xp} level={level} />
+                  <DashboardStats summary={summary} xp={xp} level={level} score={score} />
                 </ErrorBoundary>
               </motion.div>
 
@@ -344,7 +371,7 @@ function HomeContent() {
               <motion.div variants={itemVariants} className="grid grid-cols-1 xl:grid-cols-3 gap-5">
                 <div className="xl:col-span-1 space-y-4">
                   <ErrorBoundary>
-                    <EarthPanel score={summary?.current_score ?? 93} />
+                    <EarthPanel score={score ?? summary?.current_score ?? 93} />
                   </ErrorBoundary>
                 </div>
                 <div className="xl:col-span-2 space-y-5">
@@ -470,9 +497,31 @@ function HomeContent() {
           )}
 
           {/* ═══════════════════════════════════════════════════════════════
+              COACH TAB
+          ═══════════════════════════════════════════════════════════════ */}
+          {currentTab === "coach" && (
+            <motion.div variants={itemVariants} className="max-w-4xl mx-auto space-y-6">
+              <ErrorBoundary>
+                <CoachDashboard />
+              </ErrorBoundary>
+            </motion.div>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════
+              MARKETPLACE TAB
+          ═══════════════════════════════════════════════════════════════ */}
+          {currentTab === "marketplace" && (
+            <motion.div variants={itemVariants} className="max-w-4xl mx-auto space-y-6">
+              <ErrorBoundary>
+                <Marketplace />
+              </ErrorBoundary>
+            </motion.div>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════
               FALLBACK (unknown tab)
           ═══════════════════════════════════════════════════════════════ */}
-          {!["dashboard", "logger", "analytics", "devices", "quests", "history"].includes(
+          {!["dashboard", "logger", "analytics", "coach", "devices", "quests", "marketplace", "history"].includes(
             currentTab
           ) && (
             <motion.div

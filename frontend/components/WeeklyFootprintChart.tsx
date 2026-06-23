@@ -23,14 +23,14 @@ const CustomChartTooltip = ({ active, payload }: any) => {
     return (
       <div className="glass-card bg-[#0b120f]/95 px-3 py-2 rounded-xl border border-emerald-500/20 text-xs shadow-xl backdrop-blur-md">
         <p className="font-extrabold text-[9px] text-stone-500 uppercase tracking-widest mb-1.5 border-b border-white/5 pb-1">
-          {data.date_full || "Activity Date"}
+          {data?.date_full || "Activity Date"}
         </p>
         <div className="flex justify-between items-center gap-4 font-bold">
           <span className="text-stone-405 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
             Emissions:
           </span>
-          <span className="text-emerald-400">{Number(data.emissions).toFixed(1)} kg</span>
+          <span className="text-emerald-400">{Number(data?.emissions ?? 0.0).toFixed(1)} kg</span>
         </div>
       </div>
     );
@@ -56,7 +56,7 @@ export default function WeeklyFootprintChart({ summary }: WeeklyFootprintChartPr
   const { trends = [] } = summary ?? {};
 
   // If trends array is empty or short, we pad it with default values for mockup aesthetic
-  const formattedTrends = trends && trends.length > 0 ? trends : [
+  const formattedTrends = Array.isArray(trends) && trends.length > 0 ? trends : [
     { date: "Mon", emissions: 0.5, date_full: "Monday" },
     { date: "Tue", emissions: 0.8, date_full: "Tuesday" },
     { date: "Wed", emissions: 0.4, date_full: "Wednesday" },

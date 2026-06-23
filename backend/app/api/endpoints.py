@@ -2074,5 +2074,198 @@ def api_extract_entities_post(payload: EntityExtractRequest):
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ACTIVITY HISTORY ENDPOINTS (Phase E.5)
+# ─────────────────────────────────────────────────────────────────────────────
+
+from app.history.history_service import HistoryService
+from app.history.history_models import ActivityHistoryCreate
+
+history_service = HistoryService()
+
+@router.post("/history")
+def create_history_record(record: ActivityHistoryCreate):
+    try:
+        data = history_service.create_record(record.dict())
+        return {"success": True, "status": "success", "data": data}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@router.get("/history")
+def get_history_list(
+    query: Optional[str] = None,
+    category: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    carbon_level: Optional[str] = None,
+    sort_by: Optional[str] = "latest"
+):
+    try:
+        data = history_service.search_and_filter(
+            query=query,
+            category=category,
+            start_date=start_date,
+            end_date=end_date,
+            carbon_level=carbon_level,
+            sort_by=sort_by
+        )
+        return {"success": True, "status": "success", "data": data if isinstance(data, list) else []}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@router.get("/history/stats")
+def get_history_stats():
+    try:
+        stats = history_service.generate_statistics()
+        return {"success": True, "status": "success", "data": stats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@router.get("/history/export")
+def get_history_export(format: str = Query("json", regex="^(json|csv)$")):
+    try:
+        records = history_service.get_all()
+        if format == "csv":
+            csv_data = history_service.export_csv(records)
+            from fastapi.responses import Response
+            return Response(
+                content=csv_data,
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=history_export.csv"}
+            )
+        else:
+            json_data = history_service.export_json(records)
+            from fastapi.responses import Response
+            return Response(
+                content=json_data,
+                media_type="application/json",
+                headers={"Content-Disposition": "attachment; filename=history_export.json"}
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@router.get("/history/{record_id}")
+def get_history_record(record_id: str):
+    record = history_service.get_by_id(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return {"success": True, "status": "success", "data": record}
+
+@router.put("/history/{record_id}")
+def update_history_record(record_id: str, record: ActivityHistoryCreate):
+    try:
+        updated = history_service.update_record(record_id, record.dict())
+        if not updated:
+            raise HTTPException(status_code=404, detail="Record not found")
+        return {"success": True, "status": "success", "data": updated}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@router.delete("/history/{record_id}")
+def delete_history_record(record_id: str):
+    success = history_service.delete_record(record_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return {"success": True, "status": "success", "data": {"message": "Record deleted successfully"}, "message": "Record deleted successfully"}
+
+
+from app.coach.coach_service import CoachService
+coach_service = CoachService()
+
+@router.get("/coach/analysis")
+def get_coach_analysis():
+    try:
+        data = coach_service.get_analysis()
+        return {"success": True, "status": "success", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@router.get("/coach/report/weekly")
+def get_coach_weekly_report():
+    try:
+        data = coach_service.get_weekly_report()
+        return {"success": True, "status": "success", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@router.get("/coach/report/monthly")
+def get_coach_monthly_report():
+    try:
+        data = coach_service.get_monthly_report()
+        return {"success": True, "status": "success", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+class CoachChatRequest(BaseModel):
+    message: str
+
+@router.post("/coach/chat")
+def post_coach_chat(payload: CoachChatRequest):
+    try:
+        response = coach_service.answer_chat_query(payload.message)
+        return {"success": True, "status": "success", "data": {"response": response}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GAMIFICATION ENDPOINTS (Phase H)
+# ─────────────────────────────────────────────────────────────────────────────
+
+from app.gamification.gamification_service import GamificationService
+from app.gamification.gamification_models import RedeemRequest
+
+gamification_service = GamificationService()
+
+@router.get("/gamification/profile")
+def get_gamification_profile(username: str = "demo_user"):
+    try:
+        data = gamification_service.get_profile(username)
+        return {"success": True, "status": "success", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@router.get("/gamification/achievements")
+def get_gamification_achievements(username: str = "demo_user"):
+    try:
+        data = gamification_service.get_achievements(username)
+        return {"success": True, "status": "success", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@router.get("/gamification/challenges")
+def get_gamification_challenges(username: str = "demo_user"):
+    try:
+        data = gamification_service.get_challenges(username)
+        return {"success": True, "status": "success", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@router.get("/gamification/rewards")
+def get_gamification_rewards(username: str = "demo_user"):
+    try:
+        data = gamification_service.get_rewards(username)
+        return {"success": True, "rewards": data if data else []}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@router.post("/gamification/rewards/redeem")
+def redeem_gamification_reward(payload: RedeemRequest):
+    try:
+        data = gamification_service.redeem_reward(payload.username, payload.reward_id)
+        return {"success": True, "status": "success", "data": data}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+
+
+
 
 

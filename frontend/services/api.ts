@@ -220,6 +220,144 @@ export interface SystemHealth {
   failed?: boolean;
 }
 
+export interface HistoryItem {
+  name: string;
+  category: string;
+  quantity: number;
+  unit: string;
+  factor: number;
+  carbon: number;
+  formula?: string;
+  subtotal?: number;
+}
+
+export interface HistoryRecord {
+  id: string;
+  timestamp: string;
+  activities: HistoryItem[];
+  categories: string[];
+  total_carbon: number;
+  source: string;
+}
+
+export interface HistoryStats {
+  total_activities: number;
+  total_carbon: number;
+  average_carbon: number;
+  most_frequent_activity: string;
+  highest_carbon_activity: string;
+  lowest_carbon_activity: string;
+}
+
+export interface DayPlan {
+  day: number;
+  task: string;
+}
+
+export interface ActionPlan {
+  plan: DayPlan[];
+}
+
+export interface HabitPattern {
+  pattern: string;
+  confidence: number;
+  category: string;
+}
+
+export interface EnergyHabit {
+  finding: string;
+  ac_hours: number;
+  ac_percentage: number;
+}
+
+export interface FoodHabit {
+  finding: string;
+  food_profile: string;
+  veg_ratio: number;
+  animal_ratio: number;
+}
+
+export interface TransportHabit {
+  finding: string;
+  transport_profile: string;
+  public_transport_ratio: number;
+}
+
+export interface WasteHabit {
+  finding: string;
+  waste_profile: string;
+  recycling_frequency: number;
+}
+
+export interface HabitAnalysis {
+  patterns: HabitPattern[];
+  energy: EnergyHabit;
+  food: FoodHabit;
+  transport: TransportHabit;
+  waste: WasteHabit;
+}
+
+export interface CoachWeeklyReport {
+  weekly_carbon: number;
+  top_source: string;
+  potential_reduction: number;
+  summary: string;
+}
+
+export interface CoachMonthlyReport {
+  monthly_carbon: number;
+  category_ranking: { category: string; carbon: number }[];
+  behavior_changes: string[];
+  achievements: string[];
+  recommendations: string[];
+}
+
+export interface ChallengeProgress {
+  id: string;
+  name: string;
+  description: string;
+  xp: number;
+  progress: number;
+  max: number;
+  completed: boolean;
+  icon: string;
+  color: string;
+}
+
+export interface AchievementStatus {
+  id: string;
+  name: string;
+  description: string;
+  badge_type: string;
+  unlocked: boolean;
+  unlocked_at?: string;
+  progress: number;
+}
+
+export interface VirtualReward {
+  id: string;
+  name: string;
+  description: string;
+  cost: number;
+  redeemed: boolean;
+  icon: string;
+}
+
+export interface GamificationProfile {
+  username: string;
+  xp: number;
+  level: number;
+  streak: number;
+  sustainability_score: number;
+  available_xp: number;
+  total_xp: number;
+  xp_needed_for_next_level: number;
+  xp_in_current_level: number;
+  level_progress_pct: number;
+  redeemed_rewards: string[];
+}
+
+
 export interface DailySummary {
   date: string;
   activities: number;
@@ -797,6 +935,116 @@ class ApiService {
   // ─────────────────────────────────────────────────────────────────────────
   // HEALTH CHECKS
   // ─────────────────────────────────────────────────────────────────────────
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // HISTORY DATA LAYER ENDPOINTS (Phase E.5)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async getHistoryList(params: {
+    query?: string;
+    category?: string;
+    start_date?: string;
+    end_date?: string;
+    carbon_level?: string;
+    sort_by?: string;
+  } = {}): Promise<HistoryRecord[]> {
+    const queryParams = new URLSearchParams();
+    if (params.query) queryParams.append("query", params.query);
+    if (params.category) queryParams.append("category", params.category);
+    if (params.start_date) queryParams.append("start_date", params.start_date);
+    if (params.end_date) queryParams.append("end_date", params.end_date);
+    if (params.carbon_level) queryParams.append("carbon_level", params.carbon_level);
+    if (params.sort_by) queryParams.append("sort_by", params.sort_by);
+
+    const raw = await this.request<unknown>(`/history?${queryParams.toString()}`);
+
+    // Normalize: handle array, envelope objects, and unexpected shapes
+    if (Array.isArray(raw)) return raw as HistoryRecord[];
+
+    // If envelope wasn't fully unwrapped (e.g. {success, data, records})
+    if (raw && typeof raw === "object") {
+      const obj = raw as Record<string, unknown>;
+      if (Array.isArray(obj["data"])) return obj["data"] as HistoryRecord[];
+      if (Array.isArray(obj["records"])) return obj["records"] as HistoryRecord[];
+    }
+
+    // Fallback: return empty array to prevent slice crash
+    console.warn("[CarbonTracker] getHistoryList: unexpected response shape", raw);
+    return [];
+  }
+
+  async getHistoryStats(): Promise<HistoryStats> {
+    return this.request<HistoryStats>("/history/stats");
+  }
+
+  async deleteHistoryRecord(id: string): Promise<void> {
+    return this.request<void>(`/history/${id}`, { method: "DELETE" });
+  }
+
+  async createHistoryRecord(record: Partial<HistoryRecord>): Promise<HistoryRecord> {
+    return this.request<HistoryRecord>("/history", {
+      method: "POST",
+      body: JSON.stringify(record),
+    });
+  }
+
+  async updateHistoryRecord(id: string, record: Partial<HistoryRecord>): Promise<HistoryRecord> {
+    return this.request<HistoryRecord>(`/history/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(record),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // AI COACH DATA ENDPOINTS (Phase G)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async getCoachAnalysis(): Promise<HabitAnalysis> {
+    return this.request<HabitAnalysis>("/coach/analysis");
+  }
+
+  async getWeeklyCoachReport(): Promise<CoachWeeklyReport> {
+    return this.request<CoachWeeklyReport>("/coach/report/weekly");
+  }
+
+  async getMonthlyCoachReport(): Promise<CoachMonthlyReport> {
+    return this.request<CoachMonthlyReport>("/coach/report/monthly");
+  }
+
+  async postCoachChat(message: string): Promise<{ response: string }> {
+    return this.request<{ response: string }>("/coach/chat", {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // GAMIFICATION ENDPOINTS (Phase H)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async getGamificationProfile(username = "demo_user"): Promise<GamificationProfile> {
+    return this.request<GamificationProfile>(`/gamification/profile?username=${username}`);
+  }
+
+  async getGamificationAchievements(username = "demo_user"): Promise<AchievementStatus[]> {
+    return this.request<AchievementStatus[]>(`/gamification/achievements?username=${username}`);
+  }
+
+  async getGamificationChallenges(username = "demo_user"): Promise<{ daily: ChallengeProgress[]; weekly: ChallengeProgress[] }> {
+    return this.request<{ daily: ChallengeProgress[]; weekly: ChallengeProgress[] }>(`/gamification/challenges?username=${username}`);
+  }
+
+  async getGamificationRewards(username = "demo_user"): Promise<{ success: boolean; rewards: VirtualReward[] }> {
+    return this.request<{ success: boolean; rewards: VirtualReward[] }>(`/gamification/rewards?username=${username}`);
+  }
+
+  async redeemVirtualReward(rewardId: string, username = "demo_user"): Promise<{ status: string; message: string; redeemed_rewards: string[] }> {
+    return this.request<{ status: string; message: string; redeemed_rewards: string[] }>("/gamification/rewards/redeem", {
+      method: "POST",
+      body: JSON.stringify({ reward_id: rewardId, username }),
+    });
+  }
+
 
   async checkHealth(): Promise<HealthStatus> {
     try {

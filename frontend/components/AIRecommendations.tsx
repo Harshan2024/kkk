@@ -102,7 +102,7 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
     }
   ];
 
-  const activeInsights = insights && insights.length > 0 ? insights.slice(0, 3) : defaultInsights;
+  const activeInsights = Array.isArray(insights) && insights.length > 0 ? insights.slice(0, 3) : defaultInsights;
   const showDegraded = dbStatus === "degraded" || aiStatus === "degraded";
 
   return (
@@ -199,13 +199,13 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
                           </div>
                         )}
                         <div className="grid grid-cols-2 gap-x-4 gap-y-1 border-t border-white/5 pt-1.5 mt-1.5 text-[9px] text-stone-550 font-bold">
-                          {insight.weighted_priority_score !== undefined && (
+                          {typeof insight.weighted_priority_score === "number" && (
                             <div className="flex justify-between">
                               <span>Priority Score:</span>
-                              <span className="text-emerald-400">{insight.weighted_priority_score.toFixed(1)}</span>
+                              <span className="text-emerald-450">{insight.weighted_priority_score.toFixed(1)}</span>
                             </div>
                           )}
-                          {(insight.impact_estimate || insight.impact_value) && (
+                          {(insight.impact_estimate || insight.impact_value !== undefined) && (
                             <div className="flex justify-between">
                               <span>Carbon Saved:</span>
                               <span className="text-emerald-450">

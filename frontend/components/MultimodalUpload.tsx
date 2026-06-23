@@ -72,8 +72,8 @@ export default function MultimodalUpload({ onUploadSuccess, region }: Multimodal
     setLoading(true);
     setError(null);
     try {
-      const response = await uploadReceipt(file, region);
-      if (response.success && response.logged_activities) {
+      const response = (await uploadReceipt(file, region)) as any;
+      if (response && response.success && response.logged_activities) {
         setResults(response.logged_activities);
         onUploadSuccess(); // trigger dashboard refresh
       } else {

@@ -89,7 +89,7 @@ export default function Topbar({ onRefresh, region, onRegionChange }: TopbarProp
       <div className="flex items-center space-x-5">
         {/* Seeding Button for developer demo */}
         <button
-          onClick={handleSeed}
+          onClick={() => handleSeed(false)}
           disabled={seeding}
           className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-[10px] font-extrabold uppercase tracking-wider border transition-all duration-300 ${
             seeded

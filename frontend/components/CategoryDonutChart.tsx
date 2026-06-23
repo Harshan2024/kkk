@@ -29,10 +29,10 @@ const CustomPieTooltip = ({ active, payload }: any) => {
       <div className="glass-card bg-[#0b120f]/95 px-3 py-2 rounded-xl border border-emerald-500/20 text-xs shadow-xl backdrop-blur-md">
         <div className="flex justify-between items-center gap-4 font-bold font-sans">
           <span className="text-stone-400 flex items-center gap-1.5 capitalize">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: data.color }}></span>
-            {data.name}:
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: data?.color ?? "#10b981" }}></span>
+            {data?.name ?? "Category"}:
           </span>
-          <span className="text-emerald-400">{Number(data.value).toFixed(1)} kg</span>
+          <span className="text-emerald-400">{Number(data?.value ?? 0.0).toFixed(1)} kg</span>
         </div>
       </div>
     );
@@ -58,7 +58,7 @@ export default function CategoryDonutChart({ summary }: CategoryDonutChartProps)
   const { breakdown = [] } = summary ?? {};
 
   // Filter and map breakdown categories
-  let pieData = (breakdown ?? [])
+  let pieData = (Array.isArray(breakdown) ? breakdown : [])
     .filter((cat) => cat && typeof cat.total_carbon === "number" && cat.total_carbon > 0)
     .map((cat) => {
       const safe = getSafeCategory(cat.category);
@@ -140,14 +140,14 @@ export default function CategoryDonutChart({ summary }: CategoryDonutChartProps)
 
           {/* Legends (Right 7/12 columns) */}
           <div className="col-span-7 space-y-1.5 pl-3">
-            {pieData.map((entry) => (
+            {(Array.isArray(pieData) ? pieData : []).map((entry) => (
               <div key={entry.name} className="flex items-center justify-between text-[11px] font-bold">
                 <div className="flex items-center space-x-2 text-stone-400">
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }}></span>
                   <span className="capitalize truncate max-w-[80px]">{entry.name}</span>
                 </div>
                 <span className="text-stone-300 ml-1.5 flex-shrink-0">
-                  {entry.percentage.toFixed(0)}% <span className="text-stone-500 font-normal">({entry.value.toFixed(1)} kg)</span>
+                  {(entry.percentage ?? 0.0).toFixed(0)}% <span className="text-stone-500 font-normal">({(entry.value ?? 0.0).toFixed(1)} kg)</span>
                 </span>
               </div>
             ))}
