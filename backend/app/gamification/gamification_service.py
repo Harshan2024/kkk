@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
+from sqlalchemy.orm import Session
 
 from app.history.history_service import HistoryService
 from app.gamification.gamification_models import (
@@ -22,15 +23,15 @@ class GamificationService:
         self.history_service = history_service or HistoryService()
         self.repository = repository or GamificationRepository()
 
-    def get_profile(self, username: str = "demo_user") -> GamificationProfile:
-        records = self.history_service.get_all()
+    def get_profile(self, username: str = "demo_user", db: Optional[Session] = None) -> GamificationProfile:
+        records = self.history_service.get_all(db=db)
         
         # 1. Calculate base components
         streak = self.calculate_streak(records)
         sustainability_score = self.calculate_sustainability_score(records, streak)
         
         # 2. Calculate XP
-        total_xp = self.calculate_total_xp(records, streak, username)
+        total_xp = self.calculate_total_xp(records, streak, username, db=db)
         
         # 3. Calculate Level metrics
         level = (total_xp // 300) + 1
@@ -39,7 +40,7 @@ class GamificationService:
         level_progress_pct = round((xp_in_current_level / 300.0) * 100, 2)
         
         # 4. Fetch redeemed rewards
-        redeemed_rewards = self.repository.get_redeemed_rewards(username)
+        redeemed_rewards = self.repository.get_redeemed_rewards(username, db=db)
         
         # 5. Calculate available XP
         redeemed_cost = sum(
@@ -61,10 +62,10 @@ class GamificationService:
             redeemed_rewards=redeemed_rewards
         )
 
-    def get_achievements(self, username: str = "demo_user") -> List[AchievementStatus]:
-        records = self.history_service.get_all()
+    def get_achievements(self, username: str = "demo_user", db: Optional[Session] = None) -> List[AchievementStatus]:
+        records = self.history_service.get_all(db=db)
         streak = self.calculate_streak(records)
-        total_xp_pre_level5 = self.calculate_total_xp(records, streak, username, exclude_level5=True)
+        total_xp_pre_level5 = self.calculate_total_xp(records, streak, username, exclude_level5=True, db=db)
         level_pre_level5 = (total_xp_pre_level5 // 300) + 1
         
         # Compute category counters
@@ -153,8 +154,8 @@ class GamificationService:
             )
         return results
 
-    def get_challenges(self, username: str = "demo_user") -> Dict[str, List[ChallengeProgress]]:
-        records = self.history_service.get_all()
+    def get_challenges(self, username: str = "demo_user", db: Optional[Session] = None) -> Dict[str, List[ChallengeProgress]]:
+        records = self.history_service.get_all(db=db)
         today_str = datetime.utcnow().strftime("%Y-%m-%d")
         week_ago = datetime.utcnow().date() - timedelta(days=7)
         
@@ -276,8 +277,8 @@ class GamificationService:
         
         return {"daily": daily_challenges, "weekly": weekly_challenges}
 
-    def get_rewards(self, username: str = "demo_user") -> List[VirtualReward]:
-        redeemed = self.repository.get_redeemed_rewards(username)
+    def get_rewards(self, username: str = "demo_user", db: Optional[Session] = None) -> List[VirtualReward]:
+        redeemed = self.repository.get_redeemed_rewards(username, db=db)
         results = []
         for r in VIRTUAL_REWARDS_CATALOG:
             results.append(
@@ -292,19 +293,19 @@ class GamificationService:
             )
         return results
 
-    def redeem_reward(self, username: str, reward_id: str) -> Dict[str, Any]:
+    def redeem_reward(self, username: str, reward_id: str, db: Optional[Session] = None) -> Dict[str, Any]:
         catalog_item = next((r for r in VIRTUAL_REWARDS_CATALOG if r["id"] == reward_id), None)
         if not catalog_item:
             raise ValueError(f"Reward ID {reward_id} does not exist in catalog.")
             
-        profile = self.get_profile(username)
+        profile = self.get_profile(username, db=db)
         if reward_id in profile.redeemed_rewards:
             raise ValueError(f"Reward ID {reward_id} has already been redeemed.")
             
         if profile.available_xp < catalog_item["cost"]:
             raise ValueError(f"Insufficient XP. Cost is {catalog_item['cost']} XP, but you only have {profile.available_xp} XP available.")
             
-        redeemed = self.repository.redeem_reward(username, reward_id)
+        redeemed = self.repository.redeem_reward(username, reward_id, db=db)
         return {"status": "success", "message": f"Successfully redeemed {catalog_item['name']}", "redeemed_rewards": redeemed}
 
     # --- Engine Internal Calculators ---
@@ -384,7 +385,7 @@ class GamificationService:
         # Bound score between 10.0 and 100.0
         return round(max(10.0, min(100.0, score)), 1)
 
-    def calculate_total_xp(self, records: List[Dict[str, Any]], streak: int, username: str, exclude_level5: bool = False) -> int:
+    def calculate_total_xp(self, records: List[Dict[str, Any]], streak: int, username: str, exclude_level5: bool = False, db: Optional[Session] = None) -> int:
         xp = 0
         
         # 1. XP from logging activities
@@ -453,13 +454,13 @@ class GamificationService:
             
         if not exclude_level5:
             # Recheck level progress without the level 5 achievement bonus
-            xp_pre = self.calculate_total_xp(records, streak, username, exclude_level5=True)
+            xp_pre = self.calculate_total_xp(records, streak, username, exclude_level5=True, db=db)
             lvl_pre = (xp_pre // 300) + 1
             if lvl_pre >= 5:
                 xp += 500 # level_5
                 
         # 4. XP from Dynamic Challenge Completions
-        challenges = self.get_challenges(username)
+        challenges = self.get_challenges(username, db=db)
         for dc in challenges["daily"]:
             if dc.completed:
                 xp += dc.xp

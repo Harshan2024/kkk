@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Sparkles, MessageSquare } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import Sidebar from "../components/Sidebar";
 import Topbar from "../components/Topbar";
@@ -106,7 +107,17 @@ function HomeContent() {
     loadDashboardData,
     metrics,
     fetchAnalytics,
+    isAuthenticated,
+    user,
   } = useAIStore();
+
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && !isAuthenticated) {
+      router.push("/login");
+    }
+  }, [loading, isAuthenticated, router]);
 
   const [currentTab, setCurrentTab] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -175,7 +186,7 @@ function HomeContent() {
         <Sidebar
           currentTab={currentTab}
           onTabChange={handleTabChange}
-          username="Harshan R"
+          username={user?.username || "Guest"}
           xp={xp}
           level={level}
           streak={streak}
@@ -244,7 +255,7 @@ function HomeContent() {
               >
                 <div className="md:col-span-2">
                   <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-1.5">
-                    Good evening, <span className="text-emerald-400">Harshan R</span> 👋
+                    Good evening, <span className="text-emerald-450">{user?.username || "Guest"}</span> 👋
                   </h1>
                   <p className="text-[11px] font-bold text-stone-500 mt-1">
                     &ldquo;Small choices today, a better planet tomorrow.&rdquo; 🌿

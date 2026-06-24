@@ -34,6 +34,7 @@ import {
   SystemHealth,
   AnalyticsPayload,
   DEFAULT_ANALYTICS,
+  ProfileResponse,
 } from "../services/api";
 import logger from "../utils/logger";
 
@@ -89,14 +90,75 @@ interface AIContextProps {
   analyticsData: AnalyticsPayload | null;
   analyticsLoading: boolean;
   fetchAnalytics: () => Promise<void>;
+
+  // Authentication State & Actions
+  user: ProfileResponse | null;
+  isAuthenticated: boolean;
+  token: string | null;
+  login: (email: string, password: string) => Promise<boolean>;
+  register: (username: string, email: string, password: string) => Promise<boolean>;
+  logout: () => void;
+  updateProfile: (username: string, email: string) => Promise<boolean>;
+  username: string;
 }
 
 export const AIContext = createContext<AIContextProps | undefined>(undefined);
 
+export const DEFAULT_AI_CONTEXT_VALUE: AIContextProps = {
+  summary: null,
+  insights: [],
+  insightsLoading: false,
+  achievements: [],
+  achievementsLoading: false,
+  activities: [],
+  activitiesLoading: false,
+  region: "Global",
+  loading: false,
+  error: null,
+  toastError: null,
+  clearToastError: () => {},
+  setToastError: () => {},
+  setRegion: () => {},
+  loadDashboardData: async () => {},
+  logActivity: async () => {},
+  chatMessages: [],
+  chatLoading: false,
+  forecastData: [],
+  forecastLoading: false,
+  forecastStatus: null,
+  metrics: null,
+  metricsLoading: false,
+  isRecording: false,
+  transcript: "",
+  setTranscript: () => {},
+  setIsRecording: () => {},
+  fetchChatHistory: async () => {},
+  sendChatMessage: async () => "",
+  fetchForecast: async () => {},
+  fetchMetrics: async () => {},
+  uploadReceipt: async () => ({}),
+  submitCorrection: async () => {},
+  systemHealth: null,
+  fetchSystemHealth: async () => {},
+  forecastEnabled: false,
+  analyticsData: null,
+  analyticsLoading: false,
+  fetchAnalytics: async () => {},
+  user: null,
+  isAuthenticated: false,
+  token: null,
+  login: async () => false,
+  register: async () => false,
+  logout: () => {},
+  updateProfile: async () => false,
+  username: "demo_user",
+};
+
 export function useAIStore() {
   const context = useContext(AIContext);
   if (!context) {
-    throw new Error("useAIStore must be used within an AIStoreProvider");
+    logger.warn("useAIStore", "useAIStore called outside AIStoreProvider, returning default fallback state.");
+    return DEFAULT_AI_CONTEXT_VALUE;
   }
   return context;
 }
@@ -107,11 +169,20 @@ export function useAIStore() {
 
 export function AIStoreProvider({
   children,
-  username = "demo_user",
+  username: initialUsername = "demo_user",
 }: {
   children: React.ReactNode;
   username?: string;
 }) {
+  // Authentication State
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<ProfileResponse | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  const activeUsername = useMemo(() => {
+    return user?.username || initialUsername || "demo_user";
+  }, [user, initialUsername]);
+
   // Core dashboard state
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [insights, setInsights] = useState<AIInsight[]>([]);
@@ -209,7 +280,7 @@ export function AIStoreProvider({
     setError(null);
 
     try {
-      const summaryResult = await fetchWithRetry(() => api.getDashboardSummary(username));
+      const summaryResult = await fetchWithRetry(() => api.getDashboardSummary(activeUsername));
       if (summaryResult) {
         setSummary(summaryResult);
       } else {
@@ -223,7 +294,7 @@ export function AIStoreProvider({
       setLoading(false);
       isDashboardLoadingRef.current = false;
     }
-  }, [username, fetchWithRetry]);
+  }, [activeUsername, fetchWithRetry]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // SILENT BACKGROUND REFRESH
@@ -231,18 +302,18 @@ export function AIStoreProvider({
 
   const silentDashboardRefresh = useCallback(async () => {
     try {
-      const summaryData = await api.getDashboardSummary(username);
+      const summaryData = await api.getDashboardSummary(activeUsername);
       if (summaryData) {
         setSummary(summaryData);
       }
       // Silently refresh the other deferred endpoints in background
-      api.getInsights(username).then((res) => setInsights(res ?? [])).catch(() => {});
-      api.getAchievements(username).then((res) => setAchievements(res ?? [])).catch(() => {});
-      api.getActivities(username).then((res) => setActivities(res ?? [])).catch(() => {});
+      api.getInsights(activeUsername).then((res) => setInsights(res ?? [])).catch(() => {});
+      api.getAchievements(activeUsername).then((res) => setAchievements(res ?? [])).catch(() => {});
+      api.getActivities(activeUsername).then((res) => setActivities(res ?? [])).catch(() => {});
     } catch (err) {
       logger.warn("aiStore", "Silent background refresh failed", err);
     }
-  }, [username]);
+  }, [activeUsername]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // OPTIMISTIC ACTIVITY LOGGING
@@ -329,7 +400,7 @@ export function AIStoreProvider({
 
       // 4. Background DB persistence
       try {
-        const realActivity = await api.logActivity(text, username, activeRegion);
+        const realActivity = await api.logActivity(text, activeUsername, activeRegion);
         setActivities((prev) =>
           prev.map((act) => (act.id === optimisticId ? realActivity : act))
         );
@@ -343,7 +414,7 @@ export function AIStoreProvider({
         silentDashboardRefresh();
       }
     },
-    [username, silentDashboardRefresh]
+    [activeUsername, silentDashboardRefresh]
   );
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -358,7 +429,7 @@ export function AIStoreProvider({
     isChatHistoryLoadingRef.current = true;
     setChatLoading(true);
     try {
-      const history = await api.getChatHistory(username);
+      const history = await api.getChatHistory(activeUsername);
       setChatMessages(history ?? []);
     } catch (err) {
       logger.error("aiStore", "fetchChatHistory failed", err);
@@ -367,7 +438,7 @@ export function AIStoreProvider({
       setChatLoading(false);
       isChatHistoryLoadingRef.current = false;
     }
-  }, [username]);
+  }, [activeUsername]);
 
   const sendChatMessage = useCallback(
     async (message: string): Promise<string> => {
@@ -383,7 +454,7 @@ export function AIStoreProvider({
       setChatLoading(true);
 
       try {
-        const result = await api.postChat(message, username, 30_000);
+        const result = await api.postChat(message, activeUsername, 30_000);
         const assistantMsg: ChatMessage = {
           id: Date.now() + 1,
           role: "assistant",
@@ -412,7 +483,7 @@ export function AIStoreProvider({
         setChatLoading(false);
       }
     },
-    [username, silentDashboardRefresh]
+    [activeUsername, silentDashboardRefresh]
   );
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -429,7 +500,7 @@ export function AIStoreProvider({
       }
       setForecastLoading(true);
       try {
-        const res = await api.getForecast(username, steps, model, generate);
+        const res = await api.getForecast(activeUsername, steps, model, generate);
         setForecastData(res.data ?? []);
         setForecastStatus(res.status ?? null);
       } catch (err: any) {
@@ -449,20 +520,20 @@ export function AIStoreProvider({
         setForecastLoading(false);
       }
     },
-    [username, forecastEnabled]
+    [activeUsername, forecastEnabled]
   );
 
   const fetchMetrics = useCallback(async () => {
     setMetricsLoading(true);
     try {
-      const data = await api.getObservabilityMetrics(username);
+      const data = await api.getObservabilityMetrics(activeUsername);
       setMetrics(data ?? null);
     } catch (err) {
       logger.error("aiStore", "fetchMetrics failed", err);
     } finally {
       setMetricsLoading(false);
     }
-  }, [username]);
+  }, [activeUsername]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // RECEIPT UPLOAD
@@ -479,7 +550,7 @@ export function AIStoreProvider({
         throw new Error("Database temporarily unavailable. Running in read-only mode.");
       }
       try {
-        const res = await api.uploadMultimodal(file, username, activeRegion);
+        const res = await api.uploadMultimodal(file, activeUsername, activeRegion);
         silentDashboardRefresh();
         return res;
       } catch (err) {
@@ -487,7 +558,7 @@ export function AIStoreProvider({
         throw err;
       }
     },
-    [username, silentDashboardRefresh]
+    [activeUsername, silentDashboardRefresh]
   );
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -505,12 +576,12 @@ export function AIStoreProvider({
         return;
       }
       try {
-        await api.correctActivity(original, corrected, category, username);
+        await api.correctActivity(original, corrected, category, activeUsername);
       } catch (err) {
         logger.error("aiStore", "submitCorrection failed", err);
       }
     },
-    [username]
+    [activeUsername]
   );
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -530,17 +601,17 @@ export function AIStoreProvider({
     setForecastLoading(false);
     setChatLoading(true);
 
-    const insightsPromise = fetchWithRetry(() => api.getInsights(username))
+    const insightsPromise = fetchWithRetry(() => api.getInsights(activeUsername))
       .then((res) => setInsights(res ?? []))
       .catch(() => setInsights([]))
       .finally(() => setInsightsLoading(false));
 
-    const achievementsPromise = fetchWithRetry(() => api.getAchievements(username))
+    const achievementsPromise = fetchWithRetry(() => api.getAchievements(activeUsername))
       .then((res) => setAchievements(res ?? []))
       .catch(() => setAchievements([]))
       .finally(() => setAchievementsLoading(false));
 
-    const activitiesPromise = fetchWithRetry(() => api.getActivities(username))
+    const activitiesPromise = fetchWithRetry(() => api.getActivities(activeUsername))
       .then((res) => setActivities(res ?? []))
       .catch(() => setActivities([]))
       .finally(() => setActivitiesLoading(false));
@@ -549,7 +620,7 @@ export function AIStoreProvider({
 
     await Promise.allSettled([insightsPromise, achievementsPromise, activitiesPromise, chatPromise]);
     isDeferredLoadingRef.current = false;
-  }, [username, fetchWithRetry, fetchChatHistory]);
+  }, [activeUsername, fetchWithRetry, fetchChatHistory]);
 
   const fetchSystemHealth = useCallback(async () => {
     if (isSystemHealthLoadingRef.current) {
@@ -597,7 +668,7 @@ export function AIStoreProvider({
   const fetchAnalytics = useCallback(async () => {
     setAnalyticsLoading(true);
     try {
-      const data = await api.getAnalytics(username);
+      const data = await api.getAnalytics(activeUsername);
       setAnalyticsData(data ?? DEFAULT_ANALYTICS);
     } catch (err) {
       logger.error("aiStore", "fetchAnalytics failed", err);
@@ -606,7 +677,7 @@ export function AIStoreProvider({
     } finally {
       setAnalyticsLoading(false);
     }
-  }, [username]);
+  }, [activeUsername]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // INITIAL LOAD + DEFERRED LOADING
@@ -621,15 +692,103 @@ export function AIStoreProvider({
     errorRef.current = error;
   }, [error]);
 
-  // Critical startup load only — runs once on mount
+  // Authentication Actions
+  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+    try {
+      const tokenData = await api.login(email, password);
+      if (tokenData && tokenData.access_token) {
+        localStorage.setItem("carbontracker_token", tokenData.access_token);
+        setToken(tokenData.access_token);
+        setIsAuthenticated(true);
+        // Load profile immediately
+        const profile = await api.getProfile();
+        localStorage.setItem("carbontracker_user", JSON.stringify(profile));
+        setUser(profile);
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      logger.error("aiStore", "Login failed", err);
+      setToastError(err?.message || "Login failed");
+      return false;
+    }
+  }, []);
+
+  const register = useCallback(async (username: string, email: string, password: string): Promise<boolean> => {
+    try {
+      const res = await api.register(username, email, password);
+      return res?.success !== false;
+    } catch (err: any) {
+      logger.error("aiStore", "Registration failed", err);
+      setToastError(err?.message || "Registration failed");
+      return false;
+    }
+  }, []);
+
+  const logout = useCallback(() => {
+    localStorage.removeItem("carbontracker_token");
+    localStorage.removeItem("carbontracker_user");
+    setToken(null);
+    setUser(null);
+    setIsAuthenticated(false);
+    setSummary(null);
+    setInsights([]);
+    setAchievements([]);
+    setActivities([]);
+    setChatMessages([]);
+    setAnalyticsData(null);
+  }, []);
+
+  const updateProfile = useCallback(async (username: string, email: string): Promise<boolean> => {
+    try {
+      const res = await api.updateProfile(username, email);
+      if (res?.success !== false) {
+        const profile = await api.getProfile();
+        localStorage.setItem("carbontracker_user", JSON.stringify(profile));
+        setUser(profile);
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      logger.error("aiStore", "Profile update failed", err);
+      setToastError(err?.message || "Profile update failed");
+      return false;
+    }
+  }, []);
+
+  // Critical startup load and auto-login
   useEffect(() => {
+    const savedToken = localStorage.getItem("carbontracker_token");
+    const savedUser = localStorage.getItem("carbontracker_user");
+    if (savedToken) {
+      setToken(savedToken);
+      setIsAuthenticated(true);
+      if (savedUser) {
+        try {
+          setUser(JSON.parse(savedUser));
+        } catch {
+          // ignore
+        }
+      }
+      // Validate saved token & fetch latest profile
+      api.getProfile()
+        .then((profile) => {
+          localStorage.setItem("carbontracker_user", JSON.stringify(profile));
+          setUser(profile);
+        })
+        .catch((err) => {
+          logger.warn("aiStore", "Failed to validate saved token, logging out", err);
+          logout();
+        });
+    }
+    
     loadDashboardData();
     fetchSystemHealth();
 
     return () => {
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [loadDashboardData, fetchSystemHealth]);
+  }, [loadDashboardData, fetchSystemHealth, logout]);
 
   // Controlled polling loop — runs once and schedules dynamically based on synced refs
   useEffect(() => {
@@ -710,6 +869,14 @@ export function AIStoreProvider({
       analyticsData,
       analyticsLoading,
       fetchAnalytics,
+      user,
+      isAuthenticated,
+      token,
+      login,
+      register,
+      logout,
+      updateProfile,
+      username: activeUsername,
     }),
     [
       summary, insights, insightsLoading, achievements, achievementsLoading,
@@ -720,6 +887,7 @@ export function AIStoreProvider({
       sendChatMessage, fetchForecast, fetchMetrics, uploadReceipt,
       submitCorrection, systemHealth, fetchSystemHealth, forecastEnabled,
       analyticsData, analyticsLoading, fetchAnalytics,
+      user, isAuthenticated, token, login, register, logout, updateProfile, activeUsername,
     ]
   );
 

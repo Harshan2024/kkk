@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, DateTime, Date, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import relationship
 from app.database.session import Base
 
@@ -8,7 +8,18 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=True)
+    hashed_password = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False, server_default="true")
+    is_verified = Column(Boolean, default=False, nullable=False, server_default="false")
+    role = Column(String, default="user", nullable=False, server_default="'user'")
+    last_login = Column(DateTime, nullable=True)
+    xp = Column(Integer, default=0, nullable=False, server_default="0")
+    level = Column(Integer, default=1, nullable=False, server_default="1")
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    redeemed_rewards = Column(JSON, nullable=True, default=list)
 
     activities = relationship("Activity", back_populates="user", cascade="all, delete-orphan")
     scores = relationship("SustainabilityScore", back_populates="user", cascade="all, delete-orphan")
@@ -16,6 +27,10 @@ class User(Base):
     insights = relationship("AIInsight", back_populates="user", cascade="all, delete-orphan")
     chat_messages = relationship("ChatMessage", back_populates="user", cascade="all, delete-orphan")
     corrections = relationship("UserCorrection", back_populates="user", cascade="all, delete-orphan")
+    sustainability_profile = relationship("UserSustainabilityProfile", uselist=False, cascade="all, delete-orphan")
+    goals = relationship("Goal", cascade="all, delete-orphan")
+    trend_records = relationship("TrendRecord", cascade="all, delete-orphan")
+
 
     @property
     def sustainability_score(self):
@@ -72,6 +87,17 @@ class Activity(Base):
     logged_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     user = relationship("User", back_populates="activities")
+    entities = relationship("ActivityEntity", back_populates="activity", cascade="all, delete-orphan")
+
+    @property
+    def activity_text(self) -> str:
+        """Alias for input_text — satisfies Phase I.1 spec field name."""
+        return self.input_text
+
+    @property
+    def total_carbon(self) -> float:
+        """Alias for calculated_value — satisfies Phase I.1 spec field name."""
+        return self.calculated_value
 
 
 class SustainabilityScore(Base):
@@ -118,8 +144,13 @@ class AIInsight(Base):
     why_explanation = Column(String, nullable=True)
     how_calculation = Column(String, nullable=True)
     weighted_priority_score = Column(Float, nullable=True, default=0.0)
+    insight_type = Column(String(100), nullable=True)
+    priority = Column(String(50), nullable=True)
+    confidence = Column(Float, nullable=True)
+    user_relevance_score = Column(Float, nullable=True)
     is_active = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
+
 
     user = relationship("User", back_populates="insights")
 

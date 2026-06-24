@@ -39,6 +39,11 @@ from app.utils.circuit_breaker import breakers
 from app.utils.rate_limiter import check_rate_limit
 from app.config.config import settings
 
+# Authentication modules
+from app.auth.jwt_service import get_current_user
+from app.auth.auth_service import AuthService
+from app.auth.auth_models import UserRegisterRequest, UserLoginRequest, ProfileUpdateRequest
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 
@@ -87,15 +92,16 @@ def process_logged_activities_async(user_id: int, parsed_parts: list, region: st
     db = SessionLocal()
     try:
         from app.services.activity_service import calculate_emissions, update_daily_score, check_achievements
+        from app.services.persistence_service import save_activity_persistence
         from app.models import Activity
-        
+
         for p in parsed_parts:
             # Sanitize input parsed items
             category_val = sanitize_category(p.get("category"))
             item_val = p.get("item") or "unknown"
             qty_val = sanitize_float(p.get("quantity"), 1.0)
             unit_val = p.get("unit") or "unit"
-            
+
             p["category"] = category_val
             p["item"] = item_val
             p["quantity"] = qty_val
@@ -117,19 +123,34 @@ def process_logged_activities_async(user_id: int, parsed_parts: list, region: st
             db.add(activity)
             db.commit()
             db.refresh(activity)
-            
+
+            # -- Phase I.2: persist ActivityEntity, History, Analytics --------
+            try:
+                save_activity_persistence(db, user_id, activity, p, metadata)
+            except Exception as pe:
+                logger.error(f"[Phase I.2] persistence save failed for activity {activity.id}: {pe}")
+
             # Check milestones for achievements
             try:
                 check_achievements(db, user_id, activity)
             except Exception as ae:
                 logger.error(f"Failed to check achievements in background: {str(ae)}")
-            
+
         # Update daily sustainability score
         try:
             update_daily_score(db, user_id, date.today())
         except Exception as se:
             logger.error(f"Failed to update daily score in background: {str(se)}")
-        
+
+        # Update goals progress automatically
+        try:
+            from app.coach.goal_manager import GoalManager
+            gm = GoalManager(db)
+            gm.update_goal_progress(user_id)
+        except Exception as ge:
+            logger.error(f"Failed to update goals in background: {ge}")
+
+
         # Async recommendation regeneration
         try:
             generate_personalized_recommendations(db, user_id)
@@ -148,7 +169,7 @@ def process_logged_activities_async(user_id: int, parsed_parts: list, region: st
                 global_cache.delete_pattern(f"activities:{user.username}*")
         except Exception as ce:
             logger.error(f"Failed to invalidate dashboard cache in background: {ce}")
-        
+
     except Exception as e:
         logger.error(f"Async activity logging processing failed: {str(e)}")
     finally:
@@ -158,31 +179,32 @@ def process_multimodal_ocr_async(user_id: int, extracted_items: list, region: st
     db = SessionLocal()
     try:
         from app.services.activity_service import calculate_emissions, update_daily_score
+        from app.services.persistence_service import save_activity_persistence
         from app.models import Activity
-        
+
         for item in extracted_items:
             # Re-parse text to make calculation factor mappings
             qty = sanitize_float(item.get("quantity"), 1.0)
             unit = item.get("unit") or "unit"
             itm = item.get("item") or "unknown"
-            
+
             try:
                 parsed = parse_activity_text(f"{qty} {unit} {itm}")
             except Exception:
                 parsed = {}
-                
+
             category_val = sanitize_category(parsed.get("category") or item.get("category"))
             item_val = parsed.get("item") or itm
             qty_val = sanitize_float(parsed.get("quantity") or qty, 1.0)
             unit_val = parsed.get("unit") or unit
-            
+
             parsed["category"] = category_val
             parsed["item"] = item_val
             parsed["quantity"] = qty_val
             parsed["unit"] = unit_val
 
             emissions, metadata = calculate_emissions(db, parsed, region=region)
-            
+
             activity = Activity(
                 user_id=user_id,
                 input_text=item.get("text") or "scanned receipt item",
@@ -197,12 +219,28 @@ def process_multimodal_ocr_async(user_id: int, extracted_items: list, region: st
             )
             db.add(activity)
             db.commit()
-            
+            db.refresh(activity)
+
+            # -- Phase I.2: persist ActivityEntity, History, Analytics --------
+            try:
+                save_activity_persistence(db, user_id, activity, parsed, metadata)
+            except Exception as pe:
+                logger.error(f"[Phase I.2] OCR persistence save failed for activity {activity.id}: {pe}")
+
         try:
             update_daily_score(db, user_id, date.today())
         except Exception as se:
             logger.error(f"Failed to update daily score in background: {str(se)}")
-            
+
+        # Update goals progress automatically
+        try:
+            from app.coach.goal_manager import GoalManager
+            gm = GoalManager(db)
+            gm.update_goal_progress(user_id)
+        except Exception as ge:
+            logger.error(f"Failed to update goals in background: {ge}")
+
+
         # Async recommendation regeneration
         try:
             generate_personalized_recommendations(db, user_id)
@@ -221,7 +259,7 @@ def process_multimodal_ocr_async(user_id: int, extracted_items: list, region: st
                 global_cache.delete_pattern(f"activities:{user.username}*")
         except Exception as ce:
             logger.error(f"Failed to invalidate dashboard cache in background: {ce}")
-        
+
     except Exception as e:
         logger.error(f"Async OCR processing database write failed: {str(e)}")
     finally:
@@ -350,6 +388,16 @@ def canonical_display(name: str) -> str:
         
     return str(name).replace("_", " ").title()
 
+def enforce_user_context(requested_username: Optional[str], current_user: User) -> str:
+    if not requested_username or requested_username == "demo_user":
+        return current_user.username
+    if requested_username != current_user.username:
+        raise HTTPException(
+            status_code=403,
+            detail="Access forbidden: you cannot query another user's data"
+        )
+    return current_user.username
+
 def make_standardized_parse_response(status: str, error: str = "", intent: str = "unknown", entities: list = None, total_carbon: float = 0.0, success: bool = True, data: dict = None, text: str = ""):
     if entities is None:
         entities = []
@@ -426,13 +474,14 @@ def parse_activity(
     request: Request,
     text: str = Query(..., description="The activity text to parse"), 
     region: str = Query("Global", description="User active region for grid calculation"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Parses natural language input and runs calculation without writing to database.
     Supports compound activities by splitting and calculating values.
     """
-    check_rate_limit(request, "anonymous", "/activities/parse", limit=60)
+    check_rate_limit(request, current_user.username, "/activities/parse", limit=60)
     start_time = time.time()
     logger.info(f"Incoming parse preview request: '{text}' in region '{region}'")
     if not text.strip():
@@ -636,7 +685,7 @@ def parse_activity(
 
 # POST /activities
 @router.post("/activities")
-def create_activity(payload: ActivityLogRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def create_activity(payload: ActivityLogRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Logs an activity from natural language text, saves it, and recalculates daily scores.
     Supports compound activity parsing to create multiple database entries independently.
@@ -647,6 +696,7 @@ def create_activity(payload: ActivityLogRequest, background_tasks: BackgroundTas
         raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
     start_time = time.time()
     region = payload.region or "Global"
+    payload.username = enforce_user_context(payload.username, current_user)
     logger.info(f"Incoming log activity request: '{payload.text}' for user '{payload.username}' in region '{region}'")
     if not payload.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
@@ -726,12 +776,14 @@ async def upload_multimodal(
     username: str = Query("demo_user"),
     region: str = Query("Global"),
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     from app.database import session as db_session
     if db_session.READ_ONLY_MODE:
         raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
     start_time = time.time()
+    username = enforce_user_context(username, current_user)
     logger.info(f"Incoming log activity request for multimodal upload: '{file.filename}' for user '{username}'")
     
     # 1. OCR File Type & Size Validation
@@ -849,7 +901,7 @@ async def upload_multimodal(
 
 # POST /activities/correct
 @router.post("/activities/correct")
-def correct_activity(payload: CorrectionRequest, db: Session = Depends(get_db)):
+def correct_activity(payload: CorrectionRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Registers a human-in-the-loop parsing correction for conversational training.
     """
@@ -857,6 +909,7 @@ def correct_activity(payload: CorrectionRequest, db: Session = Depends(get_db)):
     if db_session.READ_ONLY_MODE:
         raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
     try:
+        payload.username = enforce_user_context(payload.username, current_user)
         user = get_or_create_user(db, payload.username)
         record = record_user_correction(
             db, user.id, payload.original_text, payload.corrected_text, payload.category
@@ -887,12 +940,14 @@ def read_activities(
     username: str = "demo_user", 
     limit: int = 20, 
     offset: int = 0,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Gets paginated list of logged activities for a user.
     """
     start_time = time.perf_counter()
+    username = enforce_user_context(username, current_user)
     from app.utils.cache import global_cache
     cache_key = f"activities:{username}:{limit}:{offset}"
     cached_data = global_cache.get(cache_key)
@@ -967,11 +1022,12 @@ def read_activities(
         }
 
 @router.post("/chat")
-def post_chat_query(payload: ChatRequest, request: Request, db: Session = Depends(get_db)):
+def post_chat_query(payload: ChatRequest, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Converses with the AI Sustainability Copilot.
     Unifies memory lookup and outputs a customized response.
     """
+    payload.username = enforce_user_context(payload.username, current_user)
     check_rate_limit(request, payload.username, "/chat", limit=60)
     try:
         user = get_or_create_user(db, payload.username)
@@ -995,10 +1051,11 @@ def post_chat_query(payload: ChatRequest, request: Request, db: Session = Depend
 
 # GET /chat/history
 @router.get("/chat/history")
-def get_chat_history_list(username: str = "demo_user", db: Session = Depends(get_db)):
+def get_chat_history_list(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Retrieves previous message history.
     """
+    username = enforce_user_context(username, current_user)
     try:
         user = get_or_create_user(db, username)
         history = get_chat_history(db, user.id, limit=20)
@@ -1036,8 +1093,10 @@ def get_forecasting(
     steps: int = 30,
     model: str = "prophet",
     generate: bool = False,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    username = enforce_user_context(username, current_user)
     """
     Exposes Expected, Optimistic, and Pessimistic forecasted projections.
     """
@@ -1100,7 +1159,8 @@ def get_forecasting(
         }
 
 @router.get("/observability/metrics")
-def get_observability(username: str = "demo_user", db: Session = Depends(get_db)):
+def get_observability(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    username = enforce_user_context(username, current_user)
     """
     Retrieves AI system diagnostics (latency, nlp confidence, total human corrections).
     """
@@ -1134,12 +1194,13 @@ def get_observability(username: str = "demo_user", db: Session = Depends(get_db)
 
 # GET /dashboard/summary
 @router.get("/dashboard/summary")
-def get_dashboard_summary(username: str = "demo_user", db: Session = Depends(get_db)):
+def get_dashboard_summary(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Retrieves aggregated dashboard statistics.
     Uses subsystem isolation try-catch layers to prevent dashboard-wide crashes.
     """
     start_time = time.perf_counter()
+    username = enforce_user_context(username, current_user)
     logger.info(f"Compiling dashboard statistics summary for user: '{username}'")
     
     from app.utils.cache import global_cache
@@ -1473,10 +1534,11 @@ def get_dashboard_summary(username: str = "demo_user", db: Session = Depends(get
 
 # GET /analytics
 @router.get("/analytics")
-def get_analytics_dashboard_data(username: str = "demo_user", db: Session = Depends(get_db)):
+def get_analytics_dashboard_data(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Retrieves the comprehensive Analytics Engine calculations for CarbonTracker.
     """
+    username = enforce_user_context(username, current_user)
     try:
         user = get_or_create_user(db, username)
         
@@ -1503,12 +1565,13 @@ def get_analytics_dashboard_data(username: str = "demo_user", db: Session = Depe
 
 # GET /insights
 @router.get("/insights")
-def read_insights(request: Request, username: str = "demo_user", db: Session = Depends(get_db)):
+def read_insights(request: Request, username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Retrieves ranked AI Insights. If none exist in the database, generates them.
     Isolates insights generation from total dashboard failure on error.
     """
     start_time = time.perf_counter()
+    username = enforce_user_context(username, current_user)
     check_rate_limit(request, username, "/insights", limit=60)
     logger.info(f"Fetching insights for user '{username}'")
     try:
@@ -1590,22 +1653,23 @@ def read_insights(request: Request, username: str = "demo_user", db: Session = D
         }
 
 @router.get("/recommendations")
-def get_recommendations_alias(request: Request, username: str = "demo_user", db: Session = Depends(get_db)):
+def get_recommendations_alias(request: Request, username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     check_rate_limit(request, username, "/recommendations", limit=60)
-    return read_insights(request, username, db)
+    return read_insights(request, username, db, current_user)
 
 @router.get("/forecast")
-def get_forecast_alias(request: Request, username: str = "demo_user", steps: int = 30, model: str = "prophet", generate: bool = False, db: Session = Depends(get_db)):
+def get_forecast_alias(request: Request, username: str = "demo_user", steps: int = 30, model: str = "prophet", generate: bool = False, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     check_rate_limit(request, username, "/forecast", limit=60)
-    return get_forecasting(request, username, steps, model, generate, db)
+    return get_forecasting(request, username, steps, model, generate, db, current_user)
 
 # GET /achievements
 @router.get("/achievements")
-def read_achievements(username: str = "demo_user", db: Session = Depends(get_db)):
+def read_achievements(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Retrieves unlocked achievements for user.
     """
     start_time = time.perf_counter()
+    username = enforce_user_context(username, current_user)
     try:
         db_start = time.perf_counter()
         user = get_or_create_user(db, username)
@@ -1676,13 +1740,15 @@ def read_achievements(username: str = "demo_user", db: Session = Depends(get_db)
 def seed_database(
     username: str = "demo_user",
     confirm: bool = False,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Seeds database categories, factors, and generates mock historical logs.
     PROTECTED: Requires confirm=true query parameter to prevent accidental data loss.
     Only available in development environment.
     """
+    username = enforce_user_context(username, current_user)
     from app.database import session as db_session
     if db_session.READ_ONLY_MODE:
         raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
@@ -1824,7 +1890,7 @@ def seed_database(
 
 # GET /feature-flags
 @router.get("/feature-flags")
-def get_flags():
+def get_flags(current_user: User = Depends(get_current_user)):
     """
     Retrieves active feature flags.
     """
@@ -1913,11 +1979,13 @@ def get_system_health(db: Session = Depends(get_db)):
 @router.get("/habit-analysis")
 def get_habit_analysis(
     username: str = "demo_user",
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Exposes a lightweight habit analysis calculation endpoint.
     """
+    username = enforce_user_context(username, current_user)
     from app.habit_analysis.habit_analysis_service import analyze_user_habits
     
     # 1. Fetch user
@@ -1943,7 +2011,8 @@ class EntityExtractRequest(BaseModel):
 @router.get("/entities/extract")
 def api_extract_entities_get(
     text: str = Query(..., description="Text to extract entities from"),
-    intent: Optional[str] = Query(None, description="Optional intent hint")
+    intent: Optional[str] = Query(None, description="Optional intent hint"),
+    current_user: User = Depends(get_current_user)
 ):
     from app.nlp.entity_engine import extract_entities, extract_multi_entities
     from app.nlp.intent_patterns import MULTI_INTENT_SPLITTERS
@@ -2009,7 +2078,7 @@ def api_extract_entities_get(
     )
 
 @router.post("/entities/extract")
-def api_extract_entities_post(payload: EntityExtractRequest):
+def api_extract_entities_post(payload: EntityExtractRequest, current_user: User = Depends(get_current_user)):
     from app.nlp.entity_engine import extract_entities, extract_multi_entities
     from app.nlp.intent_patterns import MULTI_INTENT_SPLITTERS
     has_splitters = any(s in payload.text.lower() for s in MULTI_INTENT_SPLITTERS)
@@ -2084,9 +2153,9 @@ from app.history.history_models import ActivityHistoryCreate
 history_service = HistoryService()
 
 @router.post("/history")
-def create_history_record(record: ActivityHistoryCreate):
+def create_history_record(record: ActivityHistoryCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
-        data = history_service.create_record(record.dict())
+        data = history_service.create_record(record.dict(), db=db, user_id=current_user.id)
         return {"success": True, "status": "success", "data": data}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -2100,7 +2169,9 @@ def get_history_list(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     carbon_level: Optional[str] = None,
-    sort_by: Optional[str] = "latest"
+    sort_by: Optional[str] = "latest",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     try:
         data = history_service.search_and_filter(
@@ -2109,24 +2180,26 @@ def get_history_list(
             start_date=start_date,
             end_date=end_date,
             carbon_level=carbon_level,
-            sort_by=sort_by
+            sort_by=sort_by,
+            db=db,
+            user_id=current_user.id
         )
         return {"success": True, "status": "success", "data": data if isinstance(data, list) else []}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @router.get("/history/stats")
-def get_history_stats():
+def get_history_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
-        stats = history_service.generate_statistics()
+        stats = history_service.generate_statistics(db=db, user_id=current_user.id)
         return {"success": True, "status": "success", "data": stats}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @router.get("/history/export")
-def get_history_export(format: str = Query("json", regex="^(json|csv)$")):
+def get_history_export(format: str = Query("json", pattern="^(json|csv)$"), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
-        records = history_service.get_all()
+        records = history_service.get_all(db=db, user_id=current_user.id)
         if format == "csv":
             csv_data = history_service.export_csv(records)
             from fastapi.responses import Response
@@ -2147,16 +2220,16 @@ def get_history_export(format: str = Query("json", regex="^(json|csv)$")):
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @router.get("/history/{record_id}")
-def get_history_record(record_id: str):
-    record = history_service.get_by_id(record_id)
+def get_history_record(record_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    record = history_service.get_by_id(record_id, db=db, user_id=current_user.id)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     return {"success": True, "status": "success", "data": record}
 
 @router.put("/history/{record_id}")
-def update_history_record(record_id: str, record: ActivityHistoryCreate):
+def update_history_record(record_id: str, record: ActivityHistoryCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
-        updated = history_service.update_record(record_id, record.dict())
+        updated = history_service.update_record(record_id, record.dict(), db=db, user_id=current_user.id)
         if not updated:
             raise HTTPException(status_code=404, detail="Record not found")
         return {"success": True, "status": "success", "data": updated}
@@ -2166,8 +2239,8 @@ def update_history_record(record_id: str, record: ActivityHistoryCreate):
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @router.delete("/history/{record_id}")
-def delete_history_record(record_id: str):
-    success = history_service.delete_record(record_id)
+def delete_history_record(record_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    success = history_service.delete_record(record_id, db=db, user_id=current_user.id)
     if not success:
         raise HTTPException(status_code=404, detail="Record not found")
     return {"success": True, "status": "success", "data": {"message": "Record deleted successfully"}, "message": "Record deleted successfully"}
@@ -2177,39 +2250,106 @@ from app.coach.coach_service import CoachService
 coach_service = CoachService()
 
 @router.get("/coach/analysis")
-def get_coach_analysis():
+def get_coach_analysis(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    username = enforce_user_context(username, current_user)
     try:
-        data = coach_service.get_analysis()
+        user = get_or_create_user(db, username)
+        data = coach_service.get_analysis(user.id, db)
         return {"success": True, "status": "success", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @router.get("/coach/report/weekly")
-def get_coach_weekly_report():
+def get_coach_weekly_report(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    username = enforce_user_context(username, current_user)
     try:
-        data = coach_service.get_weekly_report()
+        user = get_or_create_user(db, username)
+        data = coach_service.get_weekly_report(user.id, db)
         return {"success": True, "status": "success", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @router.get("/coach/report/monthly")
-def get_coach_monthly_report():
+def get_coach_monthly_report(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    username = enforce_user_context(username, current_user)
     try:
-        data = coach_service.get_monthly_report()
+        user = get_or_create_user(db, username)
+        data = coach_service.get_monthly_report(user.id, db)
         return {"success": True, "status": "success", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 class CoachChatRequest(BaseModel):
     message: str
+    username: Optional[str] = "demo_user"
 
 @router.post("/coach/chat")
-def post_coach_chat(payload: CoachChatRequest):
+def post_coach_chat(payload: CoachChatRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
-        response = coach_service.answer_chat_query(payload.message)
+        payload.username = enforce_user_context(payload.username, current_user)
+        user = get_or_create_user(db, payload.username)
+        response = coach_service.answer_chat_query(payload.message, user.id, db)
         return {"success": True, "status": "success", "data": {"response": response}}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+class GoalCreateRequest(BaseModel):
+    username: Optional[str] = "demo_user"
+    goal_type: str
+    target_value: float
+    target_days: Optional[int] = 7
+
+@router.post("/coach/goals")
+def create_coach_goal(payload: GoalCreateRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        payload.username = enforce_user_context(payload.username, current_user)
+        user = get_or_create_user(db, payload.username)
+        from app.coach.goal_manager import GoalManager
+        gm = GoalManager(db)
+        goal = gm.create_goal(
+            user_id=user.id,
+            goal_type=payload.goal_type,
+            target_value=payload.target_value,
+            target_date=datetime.utcnow() + timedelta(days=payload.target_days)
+        )
+        return {
+            "success": True,
+            "status": "success",
+            "data": {
+                "id": goal.id,
+                "goal_type": goal.goal_type,
+                "target_value": goal.target_value,
+                "current_value": goal.current_value,
+                "status": goal.status,
+                "progress_percentage": goal.progress_percentage
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+@router.get("/coach/goals")
+def get_coach_goals(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    username = enforce_user_context(username, current_user)
+    try:
+        user = get_or_create_user(db, username)
+        from app.coach.goal_manager import GoalManager
+        gm = GoalManager(db)
+        gm.update_goal_progress(user.id)
+        goals = gm.get_user_goals(user.id)
+        data = []
+        for g in goals:
+            data.append({
+                "id": g.id,
+                "goal_type": g.goal_type,
+                "target_value": g.target_value,
+                "current_value": g.current_value,
+                "status": g.status,
+                "progress_percentage": g.progress_percentage
+            })
+        return {"success": True, "status": "success", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2222,46 +2362,160 @@ from app.gamification.gamification_models import RedeemRequest
 gamification_service = GamificationService()
 
 @router.get("/gamification/profile")
-def get_gamification_profile(username: str = "demo_user"):
+def get_gamification_profile(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    username = enforce_user_context(username, current_user)
     try:
-        data = gamification_service.get_profile(username)
+        data = gamification_service.get_profile(username, db=db)
         return {"success": True, "status": "success", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @router.get("/gamification/achievements")
-def get_gamification_achievements(username: str = "demo_user"):
+def get_gamification_achievements(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    username = enforce_user_context(username, current_user)
     try:
-        data = gamification_service.get_achievements(username)
+        data = gamification_service.get_achievements(username, db=db)
         return {"success": True, "status": "success", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @router.get("/gamification/challenges")
-def get_gamification_challenges(username: str = "demo_user"):
+def get_gamification_challenges(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    username = enforce_user_context(username, current_user)
     try:
-        data = gamification_service.get_challenges(username)
+        data = gamification_service.get_challenges(username, db=db)
         return {"success": True, "status": "success", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @router.get("/gamification/rewards")
-def get_gamification_rewards(username: str = "demo_user"):
+def get_gamification_rewards(username: str = "demo_user", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    username = enforce_user_context(username, current_user)
     try:
-        data = gamification_service.get_rewards(username)
+        data = gamification_service.get_rewards(username, db=db)
         return {"success": True, "rewards": data if data else []}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @router.post("/gamification/rewards/redeem")
-def redeem_gamification_reward(payload: RedeemRequest):
+def redeem_gamification_reward(payload: RedeemRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
-        data = gamification_service.redeem_reward(payload.username, payload.reward_id)
+        payload.username = enforce_user_context(payload.username, current_user)
+        data = gamification_service.redeem_reward(payload.username, payload.reward_id, db=db)
         return {"success": True, "status": "success", "data": data}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+@router.get("/database/status")
+def get_database_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Returns the database connectivity, connection count, table count, and migration status.
+    """
+    from app.database import session as db_session
+    from sqlalchemy import text, inspect
+    
+    if db_session.OFFLINE_MODE:
+        return {
+            "success": True,
+            "database_online": False,
+            "connection_count": 0,
+            "table_count": 0,
+            "migration_status": "offline_safe_mode"
+        }
+        
+    try:
+        db.execute(text("SELECT 1"))
+        database_online = True
+        
+        db_driver = db.bind.dialect.name
+        connection_count = 1
+        if db_driver == "postgresql":
+            try:
+                connection_count = db.execute(text(
+                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
+                )).scalar()
+            except Exception:
+                connection_count = 1
+                
+        inspector = inspect(db.bind)
+        existing_tables = inspector.get_table_names()
+        table_count = len(existing_tables)
+        
+        expected_tables = {
+            "users", "activities", "activity_entities", "history", 
+            "analytics", "ai_insights", "coach_reports", "achievements", 
+            "sustainability_scores", "chat_messages", "emission_factors", 
+            "user_corrections", "categories", "user_sustainability_profiles", 
+            "goals", "trend_records"
+        }
+        
+        missing_tables = expected_tables - set(existing_tables)
+        if not missing_tables:
+            migration_status = "synced"
+        else:
+            migration_status = f"missing_tables: {list(missing_tables)}"
+            
+        return {
+            "success": True,
+            "database_online": database_online,
+            "connection_count": connection_count,
+            "table_count": table_count,
+            "migration_status": migration_status
+        }
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        return {
+            "success": False,
+            "database_online": False,
+            "connection_count": 0,
+            "table_count": 0,
+            "migration_status": f"error: {str(e)}"
+        }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AUTHENTICATION ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+from app.auth.auth_models import UserRegisterRequest, UserLoginRequest, ProfileUpdateRequest, PasswordResetRequest, PasswordResetConfirm
+
+@router.post("/auth/register")
+def register_user_endpoint(payload: UserRegisterRequest, db: Session = Depends(get_db)):
+    auth_service = AuthService(db)
+    user = auth_service.register_user(payload)
+    return {"success": True, "message": "User registered successfully", "user": {"username": user.username, "email": user.email}}
+
+@router.post("/auth/login")
+def login_user_endpoint(payload: UserLoginRequest, db: Session = Depends(get_db)):
+    auth_service = AuthService(db)
+    token_data = auth_service.login_user(payload)
+    return {"success": True, "data": token_data}
+
+@router.post("/auth/request-reset")
+def request_reset_endpoint(payload: PasswordResetRequest, db: Session = Depends(get_db)):
+    auth_service = AuthService(db)
+    res = auth_service.request_reset(payload.email)
+    return res
+
+@router.post("/auth/confirm-reset")
+def confirm_reset_endpoint(payload: PasswordResetConfirm, db: Session = Depends(get_db)):
+    auth_service = AuthService(db)
+    success = auth_service.confirm_reset(payload.token, payload.new_password)
+    return {"success": success, "message": "Password reset confirmed successfully"}
+
+@router.get("/profile")
+def get_profile_endpoint(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    auth_service = AuthService(db)
+    profile_data = auth_service.get_profile(current_user)
+    return {"success": True, "data": profile_data}
+
+@router.put("/profile")
+def update_profile_endpoint(payload: ProfileUpdateRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    auth_service = AuthService(db)
+    user = auth_service.update_profile(current_user, payload)
+    return {"success": True, "message": "Profile updated successfully", "user": {"username": user.username, "email": user.email}}
 
 
 

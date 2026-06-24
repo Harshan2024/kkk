@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 
+import { useAIStore } from "../stores/aiStore";
+
 interface SidebarProps {
   currentTab: string;
   onTabChange: (tab: string) => void;
@@ -28,6 +30,7 @@ export default function Sidebar({
   isOpen = false,
   onClose
 }: SidebarProps) {
+  const { logout } = useAIStore();
   const menuItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "logger", label: "Activity Logger", icon: ClipboardList },
@@ -58,7 +61,7 @@ export default function Sidebar({
           {/* App Logo */}
           <div className="flex items-center justify-between px-2 py-3 mb-5">
             <div className="flex items-center space-x-2.5">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-50 to-teal-700 flex items-center justify-center shadow-lg shadow-emerald-500/20">
                 <span className="text-white font-black text-sm tracking-tighter">CT</span>
               </div>
               <div>
@@ -88,7 +91,7 @@ export default function Sidebar({
               
               return (
                 <button
-                  key={item.id}
+                   key={item.id}
                   onClick={() => {
                     onTabChange(item.id);
                     if (onClose) onClose();
@@ -117,16 +120,27 @@ export default function Sidebar({
         {/* Footer widgets */}
         <div className="space-y-4 pt-4 border-t border-white/5">
           {/* User Card */}
-          <div className="flex items-center space-x-3 bg-white/[0.02] border border-white/5 rounded-2xl p-3">
-            <div className="w-10 h-10 rounded-full overflow-hidden border border-emerald-500/20 bg-stone-900 flex-shrink-0 flex items-center justify-center text-xs font-bold text-white">
-              HR
+          <div className="flex items-center justify-between bg-white/[0.02] border border-white/5 rounded-2xl p-3">
+            <div className="flex items-center space-x-3 min-w-0">
+              <div className="w-10 h-10 rounded-full overflow-hidden border border-emerald-500/20 bg-stone-900 flex-shrink-0 flex items-center justify-center text-xs font-bold text-white">
+                {username ? username.substring(0, 2).toUpperCase() : "CT"}
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-xs font-black text-white truncate">{username}</h4>
+                <p className="text-[10px] text-stone-500 font-bold mt-0.5">
+                  Level {level} • {xp} XP
+                </p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <h4 className="text-xs font-black text-white truncate">{username}</h4>
-              <p className="text-[10px] text-stone-500 font-bold mt-0.5">
-                Level {level} • {xp} XP
-              </p>
-            </div>
+            <button
+              onClick={() => {
+                logout();
+                window.location.reload();
+              }}
+              className="text-[10px] text-rose-450 hover:text-rose-450 font-extrabold uppercase ml-2 flex-shrink-0 cursor-pointer hover:underline"
+            >
+              Exit
+            </button>
           </div>
 
           {/* Streak Block */}

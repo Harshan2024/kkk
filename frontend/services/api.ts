@@ -202,6 +202,22 @@ export interface ObservabilityMetrics {
   avg_nlp_confidence?: number;
 }
 
+export interface TokenResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+}
+
+export interface ProfileResponse {
+  username: string;
+  email: string;
+  xp: number;
+  level: number;
+  achievements: string[];
+  sustainability_score: number;
+  joined_date: string;
+}
+
 export interface HealthStatus {
   backend: string;
   mode?: string;
@@ -686,6 +702,10 @@ class ApiService {
     if (options.body && !headers.has("Content-Type") && !(options.body instanceof FormData)) {
       headers.set("Content-Type", "application/json");
     }
+    const token = typeof window !== "undefined" ? localStorage.getItem("carbontracker_token") : null;
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
 
     const doFetch = async (): Promise<T> => {
       let response: Response;
@@ -860,11 +880,17 @@ class ApiService {
     const formData = new FormData();
     formData.append("file", file);
 
+    const headers = new Headers();
+    const token = typeof window !== "undefined" ? localStorage.getItem("carbontracker_token") : null;
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+
     const url = `${BASE_URL}/activities/upload-multimodal?username=${encodeURIComponent(username)}&region=${encodeURIComponent(region)}`;
 
     let response: Response;
     try {
-      response = await fetchWithTimeout(url, { method: "POST", body: formData }, 60_000);
+      response = await fetchWithTimeout(url, { method: "POST", body: formData, headers }, 60_000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Upload failed";
       logger.error("ApiService", "Multimodal upload network error", { error: msg });
@@ -1042,6 +1068,49 @@ class ApiService {
     return this.request<{ status: string; message: string; redeemed_rewards: string[] }>("/gamification/rewards/redeem", {
       method: "POST",
       body: JSON.stringify({ reward_id: rewardId, username }),
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // AUTHENTICATION & PROFILE ENDPOINTS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async register(username: string, email: string, password: string): Promise<any> {
+    return this.request<any>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ username, email, password }),
+    });
+  }
+
+  async login(email: string, password: string): Promise<TokenResponse> {
+    return this.request<TokenResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+  }
+
+  async requestReset(email: string): Promise<any> {
+    return this.request<any>("/auth/request-reset", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async confirmReset(token: string, newPassword: string): Promise<any> {
+    return this.request<any>("/auth/confirm-reset", {
+      method: "POST",
+      body: JSON.stringify({ token, new_password: newPassword }),
+    });
+  }
+
+  async getProfile(): Promise<ProfileResponse> {
+    return this.request<ProfileResponse>("/profile");
+  }
+
+  async updateProfile(username: string, email: string): Promise<any> {
+    return this.request<any>("/profile", {
+      method: "PUT",
+      body: JSON.stringify({ username, email }),
     });
   }
 

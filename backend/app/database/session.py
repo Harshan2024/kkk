@@ -302,3 +302,26 @@ def sync_database_schema(bind_engine) -> None:
                             log_structured("ERROR", "database_session", f"Failed to add '{col_name}' to ai_insights: {e}", exception=e)
     except Exception as e:
         log_structured("ERROR", "database_session", f"Schema sync failed for ai_insights: {e}", exception=e)
+
+    # 3. Check table "users"
+    try:
+        if "users" in inspector.get_table_names():
+            columns = [col["name"] for col in inspector.get_columns("users")]
+            with bind_engine.connect() as conn:
+                for col_name, col_def in [
+                    ("email", "VARCHAR(255) NULL UNIQUE"),
+                    ("hashed_password", "VARCHAR(255) NULL"),
+                    ("is_active", "BOOLEAN NOT NULL DEFAULT TRUE"),
+                    ("is_verified", "BOOLEAN NOT NULL DEFAULT FALSE"),
+                    ("role", "VARCHAR(50) NOT NULL DEFAULT 'user'"),
+                    ("last_login", "TIMESTAMP WITHOUT TIME ZONE NULL"),
+                ]:
+                    if col_name not in columns:
+                        log_structured("INFO", "database_session", f"Adding missing column '{col_name}' to 'users'...")
+                        try:
+                            conn.execute(sql_text(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}"))
+                            conn.commit()
+                        except Exception as e:
+                            log_structured("ERROR", "database_session", f"Failed to add '{col_name}' to users: {e}", exception=e)
+    except Exception as e:
+        log_structured("ERROR", "database_session", f"Schema sync failed for users: {e}", exception=e)

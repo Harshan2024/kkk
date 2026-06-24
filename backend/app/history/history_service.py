@@ -4,6 +4,7 @@ import json
 import uuid
 from datetime import datetime
 from typing import List, Optional, Dict, Any
+from sqlalchemy.orm import Session
 
 from app.history.history_repository import HistoryRepository
 from app.history.history_models import (
@@ -56,7 +57,7 @@ class HistoryService:
             if carbon < 0.0:
                 raise ValueError("Activity carbon emission cannot be negative")
 
-    def create_record(self, record_data: dict) -> dict:
+    def create_record(self, record_data: dict, db: Optional[Session] = None) -> dict:
         """
         Creates, validates, and persists a standard history record.
         """
@@ -65,7 +66,7 @@ class HistoryService:
             record_data["id"] = str(uuid.uuid4())
 
         # Check for duplicate ID in the repository
-        existing = self.repository.get_by_id(record_data["id"])
+        existing = self.repository.get_by_id(record_data["id"], db=db)
         if existing:
             raise ValueError(f"Record with ID {record_data['id']} already exists")
 
@@ -115,20 +116,20 @@ class HistoryService:
         # Validate standard record before saving
         self.validate_record(record_data)
 
-        # Save to local repository
-        return self.repository.save(record_data)
+        # Save to repository
+        return self.repository.save(record_data, db=db, user_id=user_id)
 
-    def get_all(self) -> List[dict]:
-        return self.repository.get_all()
+    def get_all(self, db: Optional[Session] = None, user_id: Optional[int] = None) -> List[dict]:
+        return self.repository.get_all(db=db, user_id=user_id)
 
-    def get_by_id(self, record_id: str) -> Optional[dict]:
-        return self.repository.get_by_id(record_id)
+    def get_by_id(self, record_id: str, db: Optional[Session] = None, user_id: Optional[int] = None) -> Optional[dict]:
+        return self.repository.get_by_id(record_id, db=db, user_id=user_id)
 
-    def delete_record(self, record_id: str) -> bool:
-        return self.repository.delete(record_id)
+    def delete_record(self, record_id: str, db: Optional[Session] = None, user_id: Optional[int] = None) -> bool:
+        return self.repository.delete(record_id, db=db, user_id=user_id)
 
-    def update_record(self, record_id: str, updated_data: dict) -> Optional[dict]:
-        existing = self.repository.get_by_id(record_id)
+    def update_record(self, record_id: str, updated_data: dict, db: Optional[Session] = None, user_id: Optional[int] = None) -> Optional[dict]:
+        existing = self.repository.get_by_id(record_id, db=db, user_id=user_id)
         if not existing:
             return None
 
@@ -172,7 +173,7 @@ class HistoryService:
             updated_data["source"] = existing.get("source", "manual")
 
         self.validate_record(updated_data)
-        return self.repository.update(record_id, updated_data)
+        return self.repository.update(record_id, updated_data, db=db, user_id=user_id)
 
     def search_and_filter(
         self,
@@ -181,12 +182,14 @@ class HistoryService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         carbon_level: Optional[str] = None, # "low", "high"
-        sort_by: Optional[str] = "latest"
+        sort_by: Optional[str] = "latest",
+        db: Optional[Session] = None,
+        user_id: Optional[int] = None
     ) -> List[dict]:
         """
         Executes Search (Module 6), Filtering (Module 5), and Sorting (Module 8).
         """
-        records = self.repository.get_all()
+        records = self.repository.get_all(db=db, user_id=user_id)
         filtered = []
 
         for r in records:
@@ -260,11 +263,11 @@ class HistoryService:
 
         return filtered
 
-    def generate_statistics(self) -> Dict[str, Any]:
+    def generate_statistics(self, db: Optional[Session] = None, user_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Generates History Statistics (Module 10)
         """
-        records = self.repository.get_all()
+        records = self.repository.get_all(db=db, user_id=user_id)
         if not records:
             return {
                 "total_activities": 0,

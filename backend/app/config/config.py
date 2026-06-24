@@ -25,6 +25,12 @@ class Settings:
         "postgresql://postgres:postgres@localhost:5432/carbontracker"
     )
     
+    # Authentication & JWT Configuration
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "super_secret_carbontracker_development_key")
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+    
     # CORS settings (supporting both localhost and 127.0.0.1 on ports 3000 and 3001)
     BACKEND_CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
