@@ -29,6 +29,7 @@ print(f"Current working directory: {current_dir}")
 env = {
     **os.environ,
     "ENVIRONMENT": "production",
+    "SECRET_KEY": "a_very_secure_production_secret_key_used_for_tests",
     "DATABASE_URL": "postgresql://postgres:wrongpassword@localhost:5439/nonexistent_db",
     "PYTHONPATH": current_dir
 }

@@ -1,0 +1,11 @@
+{
+  "total_requests": 2200,
+  "success_count": 763,
+  "rate_limited": 3,
+  "bad_request": 0,
+  "server_error": 0,
+  "network_error": 1434,
+  "total_time_seconds": 102.08,
+  "average_latency_ms": 4490.92,
+  "throughput_req_sec": 21.55
+}

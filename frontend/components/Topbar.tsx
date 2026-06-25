@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { Bell, HelpCircle, RefreshCw, CheckCircle2, Globe, AlertTriangle } from "lucide-react";
 import { useAIStore } from "../stores/aiStore";
 import { api } from "../services/api";
+import Link from "next/link";
 
 interface TopbarProps {
   onRefresh: () => void;
@@ -24,7 +25,7 @@ export default function Topbar({ onRefresh, region, onRegionChange }: TopbarProp
   const [seeding, setSeeding] = useState(false);
   const [seeded, setSeeded] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const { setToastError } = useAIStore();
+  const { setToastError, user } = useAIStore();
 
   const handleSeed = async (forceConfirm = false) => {
     if (!forceConfirm) {
@@ -146,9 +147,11 @@ export default function Topbar({ onRefresh, region, onRegionChange }: TopbarProp
         </button>
 
         {/* User profile avatar */}
-        <div className="w-8 h-8 rounded-full overflow-hidden border border-emerald-500/20 bg-stone-900 flex-shrink-0 flex items-center justify-center text-xs font-bold text-white shadow shadow-emerald-500/10 cursor-pointer hover:border-emerald-400 transition-colors">
-          HR
-        </div>
+        <Link href="/profile">
+          <div className="w-8 h-8 rounded-full overflow-hidden border border-emerald-500/20 bg-stone-900 flex-shrink-0 flex items-center justify-center text-xs font-bold text-white shadow shadow-emerald-500/10 cursor-pointer hover:border-emerald-400 transition-colors">
+            {user?.username ? user.username.substring(0, 2).toUpperCase() : "HR"}
+          </div>
+        </Link>
       </div>
 
       {showConfirm && (

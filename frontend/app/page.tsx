@@ -34,6 +34,7 @@ const HabitInsights = dynamic(() => import("../components/HabitInsights").then(m
 import MultimodalUpload from "../components/MultimodalUpload";
 import SystemStatusWidget from "../components/SystemStatusWidget";
 import ErrorBoundary from "../components/ErrorBoundary";
+import Settings from "../components/Settings";
 import { AIStoreProvider, useAIStore } from "../stores/aiStore";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,6 +151,16 @@ function HomeContent() {
     }
   }, [currentTab, fetchAnalytics]);
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam) {
+        setCurrentTab(tabParam);
+      }
+    }
+  }, []);
+
   // Memoized gamification values — prefer backend profile, fallback to computed if null
   const { xp, level, streak, score } = useMemo(() => {
     if (gamificationProfile) {
@@ -170,7 +181,13 @@ function HomeContent() {
     return { xp: xpVal, level: levelVal, streak: streakVal, score: scoreVal };
   }, [gamificationProfile, summary, achievements, activities]);
 
-  const handleTabChange = useCallback((tab: string) => setCurrentTab(tab), []);
+  const handleTabChange = useCallback((tab: string) => {
+    if (tab === "profile") {
+      router.push("/profile");
+    } else {
+      setCurrentTab(tab);
+    }
+  }, [router]);
 
   return (
     <div className="min-h-screen bg-[#080d0a] text-stone-100 font-sans relative overflow-x-hidden transition-colors duration-300">
@@ -530,9 +547,20 @@ function HomeContent() {
           )}
 
           {/* ═══════════════════════════════════════════════════════════════
+              SETTINGS TAB
+          ═══════════════════════════════════════════════════════════════ */}
+          {currentTab === "settings" && (
+            <motion.div variants={itemVariants} className="max-w-4xl mx-auto space-y-6">
+              <ErrorBoundary>
+                <Settings />
+              </ErrorBoundary>
+            </motion.div>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════
               FALLBACK (unknown tab)
           ═══════════════════════════════════════════════════════════════ */}
-          {!["dashboard", "logger", "analytics", "coach", "devices", "quests", "marketplace", "history"].includes(
+          {!["dashboard", "logger", "analytics", "coach", "devices", "quests", "marketplace", "history", "settings"].includes(
             currentTab
           ) && (
             <motion.div

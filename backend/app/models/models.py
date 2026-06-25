@@ -28,6 +28,7 @@ class User(Base):
     chat_messages = relationship("ChatMessage", back_populates="user", cascade="all, delete-orphan")
     corrections = relationship("UserCorrection", back_populates="user", cascade="all, delete-orphan")
     sustainability_profile = relationship("UserSustainabilityProfile", uselist=False, cascade="all, delete-orphan")
+    profile = relationship("UserProfile", uselist=False, back_populates="user", cascade="all, delete-orphan")
     goals = relationship("Goal", cascade="all, delete-orphan")
     trend_records = relationship("TrendRecord", cascade="all, delete-orphan")
 

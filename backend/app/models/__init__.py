@@ -27,6 +27,7 @@ from app.models.coach_report import CoachReport
 from app.models.user_sustainability_profile import UserSustainabilityProfile
 from app.models.goal import Goal
 from app.models.trend_record import TrendRecord
+from app.models.user_profile import UserProfile
 
 __all__ = [
     # Existing
@@ -48,4 +49,5 @@ __all__ = [
     "UserSustainabilityProfile",
     "Goal",
     "TrendRecord",
+    "UserProfile",
 ]

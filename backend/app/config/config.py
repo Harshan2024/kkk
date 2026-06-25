@@ -49,12 +49,15 @@ settings = Settings()
 def validate_environment_on_startup():
     """
     Validates required environment variables and outputs warnings if any are missing.
-    Never crashes the application startup.
     """
     import sys
     import logging
     logger = logging.getLogger("carbontracker.config")
     
+    # Critical security check: Reject default SECRET_KEY in production
+    if settings.ENVIRONMENT == "production" and settings.SECRET_KEY == "super_secret_carbontracker_development_key":
+        raise RuntimeError("CRITICAL CONFIGURATION ERROR: Default SECRET_KEY is not allowed in production mode.")
+        
     vars_to_check = {
         "DATABASE_URL": (os.getenv("DATABASE_URL"), "Database services disabled."),
         "SECRET_KEY": (os.getenv("SECRET_KEY"), "Authentication services disabled."),

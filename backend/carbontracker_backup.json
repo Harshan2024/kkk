@@ -1,0 +1,655 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "demo_user",
+      "email": null,
+      "hashed_password": null,
+      "is_active": true,
+      "is_verified": false,
+      "role": "user",
+      "last_login": null,
+      "xp": 0,
+      "level": 1,
+      "created_at": "2026-06-24T15:12:28.223559",
+      "updated_at": null,
+      "redeemed_rewards": null
+    },
+    {
+      "id": 32,
+      "username": "Harshan ",
+      "email": "tuty.harshan@gmail.com",
+      "hashed_password": "$2b$12$fLbkqszAJJzA0d3R9bMGMODjunDy42yQPv5MEzxuphFiGnR1GkHba",
+      "is_active": true,
+      "is_verified": false,
+      "role": "user",
+      "last_login": "2026-06-25T06:14:11.075616",
+      "xp": 0,
+      "level": 1,
+      "created_at": "2026-06-25T06:13:24.692923",
+      "updated_at": "2026-06-25T06:14:11.086475",
+      "redeemed_rewards": []
+    },
+    {
+      "id": 31,
+      "username": "testuser_J",
+      "email": "testuser_J@example.com",
+      "hashed_password": "$2b$12$q4jNkOVWsN01Bfdle5rN/OJ0AvtFRzVWd/snAIRXbaitwhErTt.bO",
+      "is_active": true,
+      "is_verified": false,
+      "role": "user",
+      "last_login": "2026-06-24T17:16:58.952406",
+      "xp": 0,
+      "level": 1,
+      "created_at": "2026-06-24T17:16:56.394500",
+      "updated_at": "2026-06-24T17:16:58.958003",
+      "redeemed_rewards": []
+    }
+  ],
+  "categories": [],
+  "emission_factors": [],
+  "activities": [
+    {
+      "id": 55,
+      "user_id": 32,
+      "input_text": "ate a vegetarian meal",
+      "category": "food",
+      "item": "vegetarian_meal",
+      "quantity": 1.0,
+      "unit": "plate",
+      "calculated_value": 1.2,
+      "metadata_json": {
+        "calculation_type": "food_knowledge_base",
+        "dish": "vegetarian_meal",
+        "co2_per_serving_kg": 1.2,
+        "servings": 1.0,
+        "total_emissions_kg": 1.2
+      },
+      "region": "Global",
+      "logged_at": "2026-06-25T06:15:42.809553"
+    },
+    {
+      "id": 56,
+      "user_id": 32,
+      "input_text": "drive in a car for 5km.",
+      "category": "transport",
+      "item": "petrol car",
+      "quantity": 5.0,
+      "unit": "km",
+      "calculated_value": 0.96,
+      "metadata_json": {
+        "co2": 0.96,
+        "factor": 0.192,
+        "source": "CarbonTracker Standard",
+        "method": "formula",
+        "distance_km": 5.0,
+        "vehicle_mapped": "petrol car",
+        "emission_factor": 0.192
+      },
+      "region": "Global",
+      "logged_at": "2026-06-25T06:15:43.216054"
+    },
+    {
+      "id": 15,
+      "user_id": 1,
+      "input_text": "ate a vegetarian meal",
+      "category": "food",
+      "item": "vegetarian_meal",
+      "quantity": 1.0,
+      "unit": "plate",
+      "calculated_value": 1.2,
+      "metadata_json": {
+        "calculation_type": "food_knowledge_base",
+        "dish": "vegetarian_meal",
+        "co2_per_serving_kg": 1.2,
+        "servings": 1.0,
+        "total_emissions_kg": 1.2
+      },
+      "region": "Global",
+      "logged_at": "2026-06-24T16:14:12.877296"
+    },
+    {
+      "id": 42,
+      "user_id": 1,
+      "input_text": "I travelled 10 km by bike",
+      "category": "transport",
+      "item": "bicycle",
+      "quantity": 10.0,
+      "unit": "km",
+      "calculated_value": 0.0,
+      "metadata_json": {
+        "co2": 0.0,
+        "factor": 0.0,
+        "source": "CarbonTracker Standard",
+        "method": "formula",
+        "distance_km": 10.0,
+        "vehicle_mapped": "bicycle",
+        "emission_factor": 0.0
+      },
+      "region": "Global",
+      "logged_at": "2026-06-24T16:47:27.676912"
+    },
+    {
+      "id": 43,
+      "user_id": 1,
+      "input_text": "ate 1 chicken biriyani",
+      "category": "food",
+      "item": "Chicken Biriyani",
+      "quantity": 1.0,
+      "unit": "plate",
+      "calculated_value": 2.5,
+      "metadata_json": {
+        "calculation_type": "food_knowledge_base",
+        "dish": "Chicken Biriyani",
+        "co2_per_serving_kg": 2.5,
+        "servings": 1.0,
+        "total_emissions_kg": 2.5
+      },
+      "region": "Global",
+      "logged_at": "2026-06-24T16:47:27.816809"
+    }
+  ],
+  "sustainability_scores": [
+    {
+      "id": 1,
+      "user_id": 1,
+      "date": "2026-06-24",
+      "total_emissions": 3.7,
+      "score": 63.0,
+      "logged_at": "2026-06-24T15:12:28.333558"
+    },
+    {
+      "id": 2,
+      "user_id": 32,
+      "date": "2026-06-25",
+      "total_emissions": 2.16,
+      "score": 100.0,
+      "logged_at": "2026-06-25T06:14:12.414650"
+    }
+  ],
+  "achievements": [
+    {
+      "id": 1,
+      "user_id": 1,
+      "name": "Eco Pioneer",
+      "description": "Logged your first carbon activity!",
+      "badge_type": "bronze",
+      "unlocked_at": "2026-06-24T16:14:13.005255"
+    },
+    {
+      "id": 4,
+      "user_id": 32,
+      "name": "Eco Pioneer",
+      "description": "Logged your first carbon activity!",
+      "badge_type": "bronze",
+      "unlocked_at": "2026-06-25T06:15:43.210070"
+    }
+  ],
+  "ai_insights": [
+    {
+      "id": 79,
+      "user_id": 32,
+      "content": "Swap beef for chicken or paneer/lentils to significantly lower your diet footprint.",
+      "category": "food",
+      "impact_estimate": "Saves 53.1 kg CO2e/month",
+      "impact_level": "HIGH",
+      "impact_value": 53.1,
+      "feasibility": "HIGH",
+      "difficulty": "EASY",
+      "confidence_score": 0.95,
+      "sustainability_gain": 9.2,
+      "behavioral_compatibility": 8.8,
+      "why_explanation": "Food is a recurring source of personal carbon. Swapping high-impact red meat for poultry or plant-based proteins yields immediate, repeatable footprint reductions.",
+      "how_calculation": "Calculated by subtracting chicken emissions factor (6.9 kg CO2e/kg) from beef emissions factor (60.0 kg CO2e/kg) over a standard consumption profile.",
+      "weighted_priority_score": 2.46,
+      "insight_type": null,
+      "priority": null,
+      "confidence": null,
+      "user_relevance_score": null,
+      "is_active": 1,
+      "created_at": "2026-06-25T06:15:43.382594"
+    },
+    {
+      "id": 80,
+      "user_id": 32,
+      "content": "Shift some AC cooling hours to a standard ceiling fan, saving about 1.0 kg CO2e per hour.",
+      "category": "appliances",
+      "impact_estimate": "Saves 30.0 kg CO2e/month",
+      "impact_level": "HIGH",
+      "impact_value": 30.0,
+      "feasibility": "HIGH",
+      "difficulty": "EASY",
+      "confidence_score": 0.95,
+      "sustainability_gain": 8.8,
+      "behavioral_compatibility": 8.5,
+      "why_explanation": "Compressor-based cooling draws substantial grid power. Toggling to a fan for even part of the day directly cuts appliance load.",
+      "how_calculation": "Uses AC wattage (1500W) minus ceiling fan wattage (75W) multiplied by regional grid factor emissions per kWh.",
+      "weighted_priority_score": 2.32,
+      "insight_type": null,
+      "priority": null,
+      "confidence": null,
+      "user_relevance_score": null,
+      "is_active": 1,
+      "created_at": "2026-06-25T06:15:43.382594"
+    },
+    {
+      "id": 81,
+      "user_id": 32,
+      "content": "Incorporate 2 plant-based days weekly, replacing meat with curd rice, vegetables, and beans.",
+      "category": "food",
+      "impact_estimate": "Saves 12.0 kg CO2e/month",
+      "impact_level": "MEDIUM",
+      "impact_value": 12.0,
+      "feasibility": "HIGH",
+      "difficulty": "EASY",
+      "confidence_score": 0.92,
+      "sustainability_gain": 7.5,
+      "behavioral_compatibility": 9.0,
+      "why_explanation": "A vegetarian diet has less agricultural land and methane overhead. Two dedicated days per week build a consistent sustainability routine.",
+      "how_calculation": "Aggregates the carbon savings of substituting 4 meat meals per week with vegetarian meals rated at 0.5 kg CO2e each.",
+      "weighted_priority_score": 2.18,
+      "insight_type": null,
+      "priority": null,
+      "confidence": null,
+      "user_relevance_score": null,
+      "is_active": 1,
+      "created_at": "2026-06-25T06:15:43.382594"
+    },
+    {
+      "id": 82,
+      "user_id": 32,
+      "content": "Reduce shower duration by 3 minutes to save water heating electricity and tap consumption.",
+      "category": "water",
+      "impact_estimate": "Saves 8.5 kg CO2e/month",
+      "impact_level": "MEDIUM",
+      "impact_value": 8.5,
+      "feasibility": "HIGH",
+      "difficulty": "EASY",
+      "confidence_score": 0.9,
+      "sustainability_gain": 6.8,
+      "behavioral_compatibility": 8.5,
+      "why_explanation": "Hot showers consume water and heating energy. A slight time trim reduces municipal water pumping and electricity load.",
+      "how_calculation": "Calculates savings of 27L water (9L/min) and the thermal energy required to heat it (using standard geyser wattage).",
+      "weighted_priority_score": 2.1,
+      "insight_type": null,
+      "priority": null,
+      "confidence": null,
+      "user_relevance_score": null,
+      "is_active": 1,
+      "created_at": "2026-06-25T06:15:43.382594"
+    },
+    {
+      "id": 51,
+      "user_id": 1,
+      "content": "Swap beef for chicken or paneer/lentils to significantly lower your diet footprint.",
+      "category": "food",
+      "impact_estimate": "Saves 53.1 kg CO2e/month",
+      "impact_level": "HIGH",
+      "impact_value": 53.1,
+      "feasibility": "HIGH",
+      "difficulty": "EASY",
+      "confidence_score": 0.95,
+      "sustainability_gain": 9.2,
+      "behavioral_compatibility": 8.8,
+      "why_explanation": "Food is a recurring source of personal carbon. Swapping high-impact red meat for poultry or plant-based proteins yields immediate, repeatable footprint reductions.",
+      "how_calculation": "Calculated by subtracting chicken emissions factor (6.9 kg CO2e/kg) from beef emissions factor (60.0 kg CO2e/kg) over a standard consumption profile.",
+      "weighted_priority_score": 2.46,
+      "insight_type": null,
+      "priority": null,
+      "confidence": null,
+      "user_relevance_score": null,
+      "is_active": 1,
+      "created_at": "2026-06-24T16:47:27.898386"
+    },
+    {
+      "id": 52,
+      "user_id": 1,
+      "content": "Shift some AC cooling hours to a standard ceiling fan, saving about 1.0 kg CO2e per hour.",
+      "category": "appliances",
+      "impact_estimate": "Saves 30.0 kg CO2e/month",
+      "impact_level": "HIGH",
+      "impact_value": 30.0,
+      "feasibility": "HIGH",
+      "difficulty": "EASY",
+      "confidence_score": 0.95,
+      "sustainability_gain": 8.8,
+      "behavioral_compatibility": 8.5,
+      "why_explanation": "Compressor-based cooling draws substantial grid power. Toggling to a fan for even part of the day directly cuts appliance load.",
+      "how_calculation": "Uses AC wattage (1500W) minus ceiling fan wattage (75W) multiplied by regional grid factor emissions per kWh.",
+      "weighted_priority_score": 2.32,
+      "insight_type": null,
+      "priority": null,
+      "confidence": null,
+      "user_relevance_score": null,
+      "is_active": 1,
+      "created_at": "2026-06-24T16:47:27.902411"
+    },
+    {
+      "id": 53,
+      "user_id": 1,
+      "content": "Incorporate 2 plant-based days weekly, replacing meat with curd rice, vegetables, and beans.",
+      "category": "food",
+      "impact_estimate": "Saves 12.0 kg CO2e/month",
+      "impact_level": "MEDIUM",
+      "impact_value": 12.0,
+      "feasibility": "HIGH",
+      "difficulty": "EASY",
+      "confidence_score": 0.92,
+      "sustainability_gain": 7.5,
+      "behavioral_compatibility": 9.0,
+      "why_explanation": "A vegetarian diet has less agricultural land and methane overhead. Two dedicated days per week build a consistent sustainability routine.",
+      "how_calculation": "Aggregates the carbon savings of substituting 4 meat meals per week with vegetarian meals rated at 0.5 kg CO2e each.",
+      "weighted_priority_score": 2.18,
+      "insight_type": null,
+      "priority": null,
+      "confidence": null,
+      "user_relevance_score": null,
+      "is_active": 1,
+      "created_at": "2026-06-24T16:47:27.902411"
+    },
+    {
+      "id": 54,
+      "user_id": 1,
+      "content": "Reduce shower duration by 3 minutes to save water heating electricity and tap consumption.",
+      "category": "water",
+      "impact_estimate": "Saves 8.5 kg CO2e/month",
+      "impact_level": "MEDIUM",
+      "impact_value": 8.5,
+      "feasibility": "HIGH",
+      "difficulty": "EASY",
+      "confidence_score": 0.9,
+      "sustainability_gain": 6.8,
+      "behavioral_compatibility": 8.5,
+      "why_explanation": "Hot showers consume water and heating energy. A slight time trim reduces municipal water pumping and electricity load.",
+      "how_calculation": "Calculates savings of 27L water (9L/min) and the thermal energy required to heat it (using standard geyser wattage).",
+      "weighted_priority_score": 2.1,
+      "insight_type": null,
+      "priority": null,
+      "confidence": null,
+      "user_relevance_score": null,
+      "is_active": 1,
+      "created_at": "2026-06-24T16:47:27.902411"
+    }
+  ],
+  "chat_messages": [],
+  "user_corrections": [],
+  "activity_entities": [
+    {
+      "id": 32,
+      "activity_id": 42,
+      "entity_name": "bicycle",
+      "entity_category": "transport",
+      "quantity": 10.0,
+      "unit": "km",
+      "factor": 0.0,
+      "carbon_emission": 0.0,
+      "created_at": "2026-06-24T16:47:27.722607"
+    },
+    {
+      "id": 33,
+      "activity_id": 43,
+      "entity_name": "Chicken Biriyani",
+      "entity_category": "food",
+      "quantity": 1.0,
+      "unit": "plate",
+      "factor": 2.5,
+      "carbon_emission": 2.5,
+      "created_at": "2026-06-24T16:47:27.829670"
+    },
+    {
+      "id": 43,
+      "activity_id": 55,
+      "entity_name": "vegetarian_meal",
+      "entity_category": "food",
+      "quantity": 1.0,
+      "unit": "plate",
+      "factor": 1.2,
+      "carbon_emission": 1.2,
+      "created_at": "2026-06-25T06:15:42.868246"
+    },
+    {
+      "id": 44,
+      "activity_id": 56,
+      "entity_name": "petrol car",
+      "entity_category": "transport",
+      "quantity": 5.0,
+      "unit": "km",
+      "factor": 0.192,
+      "carbon_emission": 0.96,
+      "created_at": "2026-06-25T06:15:43.228712"
+    }
+  ],
+  "history": [
+    {
+      "id": 32,
+      "user_id": 1,
+      "activity_id": 42,
+      "created_at": "2026-06-24T16:47:27.746163"
+    },
+    {
+      "id": 33,
+      "user_id": 1,
+      "activity_id": 43,
+      "created_at": "2026-06-24T16:47:27.841373"
+    },
+    {
+      "id": 43,
+      "user_id": 32,
+      "activity_id": 55,
+      "created_at": "2026-06-25T06:15:42.883625"
+    },
+    {
+      "id": 44,
+      "user_id": 32,
+      "activity_id": 56,
+      "created_at": "2026-06-25T06:15:43.247175"
+    }
+  ],
+  "analytics": [
+    {
+      "id": 10,
+      "user_id": 1,
+      "weekly_total": 3.7,
+      "monthly_total": 3.7,
+      "sustainability_score": 100.0,
+      "last_updated": "2026-06-24T16:47:27.849736"
+    },
+    {
+      "id": 13,
+      "user_id": 32,
+      "weekly_total": 2.16,
+      "monthly_total": 2.16,
+      "sustainability_score": 100.0,
+      "last_updated": "2026-06-25T06:15:43.271027"
+    }
+  ],
+  "coach_reports": [
+    {
+      "id": 23,
+      "user_id": 32,
+      "report_type": "weekly_summary",
+      "report_data": {
+        "weekly_carbon": 0,
+        "top_source": "ENERGY",
+        "potential_reduction": 0.0,
+        "category_breakdown": {
+          "food": 0.0,
+          "transport": 0.0,
+          "energy": 0.0,
+          "waste": 0.0
+        },
+        "best_improvement": "food",
+        "risk_category": "energy",
+        "summary": "Your weekly footprint was 0.0 kg CO2e. Your highest emission source was energy.",
+        "recommendations": [
+          "Reduce AC runtime by 1 hour daily to save emissions.",
+          "Set AC temperature to 24°C instead of cooler targets.",
+          "Walk or cycle for trips under 2 km instead of driving."
+        ]
+      },
+      "created_at": "2026-06-25T06:14:20.605551"
+    },
+    {
+      "id": 24,
+      "user_id": 32,
+      "report_type": "monthly_summary",
+      "report_data": {
+        "monthly_carbon": 0,
+        "category_ranking": [
+          {
+            "category": "food",
+            "carbon": 0.0
+          },
+          {
+            "category": "transport",
+            "carbon": 0.0
+          },
+          {
+            "category": "energy",
+            "carbon": 0.0
+          },
+          {
+            "category": "waste",
+            "carbon": 0.0
+          }
+        ],
+        "behavior_changes": [
+          "Stable footprint profile.",
+          "Month-over-month emission change is +0.0%."
+        ],
+        "achievements": [],
+        "recommendations": [
+          "Choose a completely vegetarian lunch for immediate food footprint drop.",
+          "Limit meat meals (like chicken/beef) to 2 servings weekly.",
+          "Use public transit (bus/train) for daily commutes."
+        ],
+        "mom_change": 0.0,
+        "progress_score": 85.0,
+        "habit_evolution": "Your transport profile is 'eco_commuter'. Diet is 'balanced_diet'.",
+        "trend_analysis": "30-day forecast is stabilizing.",
+        "future_outlook": "Implementing energy recommendations will yield immediately higher scores."
+      },
+      "created_at": "2026-06-25T06:14:20.676878"
+    },
+    {
+      "id": 25,
+      "user_id": 32,
+      "report_type": "weekly_summary",
+      "report_data": {
+        "weekly_carbon": 0,
+        "top_source": "ENERGY",
+        "potential_reduction": 0.0,
+        "category_breakdown": {
+          "food": 0.0,
+          "transport": 0.0,
+          "energy": 0.0,
+          "waste": 0.0
+        },
+        "best_improvement": "food",
+        "risk_category": "energy",
+        "summary": "Your weekly footprint was 0.0 kg CO2e. Your highest emission source was energy.",
+        "recommendations": [
+          "Separate recyclable plastics and paper from landfill bins.",
+          "Dispose of electronic waste and old chargers at designated recycle centers.",
+          "Reduce AC runtime by 1 hour daily to save emissions."
+        ]
+      },
+      "created_at": "2026-06-25T06:14:20.739398"
+    },
+    {
+      "id": 26,
+      "user_id": 32,
+      "report_type": "monthly_summary",
+      "report_data": {
+        "monthly_carbon": 0,
+        "category_ranking": [
+          {
+            "category": "food",
+            "carbon": 0.0
+          },
+          {
+            "category": "transport",
+            "carbon": 0.0
+          },
+          {
+            "category": "energy",
+            "carbon": 0.0
+          },
+          {
+            "category": "waste",
+            "carbon": 0.0
+          }
+        ],
+        "behavior_changes": [
+          "Stable footprint profile.",
+          "Month-over-month emission change is +0.0%."
+        ],
+        "achievements": [],
+        "recommendations": [
+          "Reduce AC runtime by 1 hour daily to save emissions.",
+          "Set AC temperature to 24°C instead of cooler targets.",
+          "Walk or cycle for trips under 2 km instead of driving."
+        ],
+        "mom_change": 0.0,
+        "progress_score": 85.0,
+        "habit_evolution": "Your transport profile is 'eco_commuter'. Diet is 'balanced_diet'.",
+        "trend_analysis": "30-day forecast is stabilizing.",
+        "future_outlook": "Implementing energy recommendations will yield immediately higher scores."
+      },
+      "created_at": "2026-06-25T06:14:20.768492"
+    }
+  ],
+  "user_sustainability_profiles": [
+    {
+      "id": 6,
+      "user_id": 32,
+      "primary_lifestyle_type": "Eco Balanced",
+      "transport_profile": "eco_commuter",
+      "food_profile": "balanced_diet",
+      "energy_profile": "eco_energy_saver",
+      "waste_profile": "eco_waste_saver",
+      "overall_maturity": "Eco Beginner",
+      "created_at": "2026-06-25T06:14:20.362916",
+      "updated_at": "2026-06-25T06:14:20.576525"
+    }
+  ],
+  "goals": [],
+  "trend_records": [
+    {
+      "id": 31,
+      "user_id": 32,
+      "period_days": 30,
+      "trend_pct": 0.0,
+      "best_improvement_period": "Week 1 (-0.0 kgCO2e)",
+      "worst_emission_period": "Week 1 (0.0 kgCO2e)",
+      "most_improved_category": "food",
+      "most_problematic_category": "energy",
+      "consistency_evolution": "Consistent: logged 0 days recently vs 0 days previously.",
+      "created_at": "2026-06-25T06:14:20.659646"
+    },
+    {
+      "id": 32,
+      "user_id": 32,
+      "period_days": 60,
+      "trend_pct": 0.0,
+      "best_improvement_period": "Week 1 (-0.0 kgCO2e)",
+      "worst_emission_period": "Week 1 (0.0 kgCO2e)",
+      "most_improved_category": "food",
+      "most_problematic_category": "energy",
+      "consistency_evolution": "Consistent: logged 0 days recently vs 0 days previously.",
+      "created_at": "2026-06-25T06:14:20.659646"
+    },
+    {
+      "id": 33,
+      "user_id": 32,
+      "period_days": 90,
+      "trend_pct": 0.0,
+      "best_improvement_period": "Week 1 (-0.0 kgCO2e)",
+      "worst_emission_period": "Week 1 (0.0 kgCO2e)",
+      "most_improved_category": "food",
+      "most_problematic_category": "energy",
+      "consistency_evolution": "Consistent: logged 0 days recently vs 0 days previously.",
+      "created_at": "2026-06-25T06:14:20.659646"
+    }
+  ]
+}

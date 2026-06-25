@@ -47,6 +47,28 @@ class JWTService:
         except jwt.InvalidTokenError:
             return None
 
+    @staticmethod
+    def is_blacklisted(token: str) -> bool:
+        from app.utils.cache import global_cache
+        return global_cache.exists(f"blacklist:{token}")
+
+    @staticmethod
+    def blacklist_token(token: str) -> bool:
+        from app.utils.cache import global_cache
+        try:
+            # Decode without exp verification to check exp for TTL even if already expired
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM], options={"verify_exp": False})
+            exp = payload.get("exp")
+            if exp:
+                import time
+                remaining = int(exp - time.time())
+                if remaining > 0:
+                    global_cache.set(f"blacklist:{token}", "true", ttl=remaining)
+                    return True
+        except Exception:
+            pass
+        return False
+
 def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> User:
     import os
     credentials_exception = HTTPException(
@@ -64,6 +86,9 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
                 db.commit()
                 db.refresh(demo_user)
             return demo_user
+        raise credentials_exception
+
+    if JWTService.is_blacklisted(token):
         raise credentials_exception
 
     payload = JWTService.decode_token(token)

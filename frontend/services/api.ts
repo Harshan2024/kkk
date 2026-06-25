@@ -1107,11 +1107,48 @@ class ApiService {
     return this.request<ProfileResponse>("/profile");
   }
 
-  async updateProfile(username: string, email: string): Promise<any> {
+  async updateProfile(data: any): Promise<any> {
     return this.request<any>("/profile", {
       method: "PUT",
-      body: JSON.stringify({ username, email }),
+      body: JSON.stringify(data),
     });
+  }
+
+  async uploadAvatar(file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const headers = new Headers();
+    const token = typeof window !== "undefined" ? localStorage.getItem("carbontracker_token") : null;
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+
+    const url = `${BASE_URL}/profile/avatar`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      body: formData,
+      headers
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorDetail = "Avatar upload failed";
+      try {
+        const errJson = JSON.parse(errorText);
+        errorDetail = errJson.detail || errJson.error || errorDetail;
+      } catch {
+        errorDetail = errorText || errorDetail;
+      }
+      throw new Error(errorDetail);
+    }
+
+    return response.json();
+  }
+
+  async getSecurityStatus(): Promise<any> {
+    return this.request<any>("/security/status");
   }
 
 

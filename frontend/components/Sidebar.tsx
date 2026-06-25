@@ -3,7 +3,7 @@
 import React from "react";
 import { 
   LayoutDashboard, ClipboardList, BarChart3, Trophy, 
-  ShoppingBag, Users, History, Settings, Flame, Gift, X, Cpu, Brain
+  ShoppingBag, Users, History, Settings, Flame, Gift, X, Cpu, Brain, User
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -41,6 +41,7 @@ export default function Sidebar({
     { id: "marketplace", label: "Marketplace", icon: ShoppingBag },
     { id: "community", label: "Community", icon: Users },
     { id: "history", label: "History", icon: History },
+    { id: "profile", label: "Profile", icon: User },
     { id: "settings", label: "Settings", icon: Settings },
   ];
 
