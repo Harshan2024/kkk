@@ -58,7 +58,7 @@ const StatusRow = memo(function StatusRow({
 });
 
 export default memo(function SystemStatusWidget() {
-  const { systemHealth, fetchSystemHealth } = useAIStore();
+  const { systemHealth, fetchSystemHealth, smartDevicesEnabled } = useAIStore();
   const [refreshing, setRefreshing] = useState(false);
 
   const handleRefresh = useCallback(async () => {
@@ -121,11 +121,13 @@ export default memo(function SystemStatusWidget() {
             label="Cache"
             status={systemHealth?.cache}
           />
-          <StatusRow
-            icon={Wifi}
-            label="IoT Service"
-            status={systemHealth?.iot}
-          />
+          {smartDevicesEnabled && (
+            <StatusRow
+              icon={Wifi}
+              label="IoT Service"
+              status={systemHealth?.iot}
+            />
+          )}
         </div>
       )}
     </div>

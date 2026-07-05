@@ -39,6 +39,9 @@ from app.utils.circuit_breaker import breakers
 from app.utils.rate_limiter import check_rate_limit
 from app.config.config import settings
 
+from app.utils.sanitizer import sanitize_text, sanitize_filename
+from app.utils.audit_logger import log_security_audit
+
 # Authentication modules
 from app.auth.jwt_service import get_current_user, oauth2_scheme
 from app.auth.auth_service import AuthService
@@ -46,6 +49,30 @@ from app.auth.auth_models import UserRegisterRequest, UserLoginRequest, ProfileU
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
+
+def invalidate_user_caches(db: Session, username: str):
+    from app.utils.cache import global_cache
+    from app.models import User
+    
+    global_cache.delete(f"user_obj:{username}")
+    global_cache.delete(f"profile_data:{username}")
+    global_cache.delete(f"gamification_profile:{username}")
+    global_cache.delete(f"gamification_achievements:{username}")
+    global_cache.delete(f"gamification_challenges:{username}")
+    global_cache.delete(f"dashboard:{username}")
+    global_cache.delete_pattern(f"forecast_{username}")
+    global_cache.delete(f"habit_analysis_{username}")
+    global_cache.delete_pattern(f"activities:{username}*")
+    
+    try:
+        user = db.query(User).filter(User.username == username).first()
+        if user:
+            user_id = user.id
+            global_cache.delete(f"streaks:{user_id}")
+            global_cache.delete(f"quests:{user_id}")
+            global_cache.delete(f"xp_level:{user_id}")
+    except Exception:
+        pass
 
 class StructuredLoggerWrapper:
     def __init__(self, service_name: str):
@@ -159,14 +186,10 @@ def process_logged_activities_async(user_id: int, parsed_parts: list, region: st
 
         # Invalidate cache
         try:
-            from app.utils.cache import global_cache
             from app.models import User
             user = db.query(User).filter(User.id == user_id).first()
             if user:
-                global_cache.delete(f"dashboard:{user.username}")
-                global_cache.delete_pattern(f"forecast_{user.username}")
-                global_cache.delete(f"habit_analysis_{user.username}")
-                global_cache.delete_pattern(f"activities:{user.username}*")
+                invalidate_user_caches(db, user.username)
         except Exception as ce:
             logger.error(f"Failed to invalidate dashboard cache in background: {ce}")
 
@@ -249,14 +272,10 @@ def process_multimodal_ocr_async(user_id: int, extracted_items: list, region: st
 
         # Invalidate cache
         try:
-            from app.utils.cache import global_cache
             from app.models import User
             user = db.query(User).filter(User.id == user_id).first()
             if user:
-                global_cache.delete(f"dashboard:{user.username}")
-                global_cache.delete_pattern(f"forecast_{user.username}")
-                global_cache.delete(f"habit_analysis_{user.username}")
-                global_cache.delete_pattern(f"activities:{user.username}*")
+                invalidate_user_caches(db, user.username)
         except Exception as ce:
             logger.error(f"Failed to invalidate dashboard cache in background: {ce}")
 
@@ -707,6 +726,7 @@ def create_activity(
     start_time = time.time()
     region = payload.region or "Global"
     payload.username = enforce_user_context(payload.username, current_user)
+    payload.text = sanitize_text(payload.text)
     check_rate_limit(request, payload.username, "/activities", limit=100)
     logger.info(f"Incoming log activity request: '{payload.text}' for user '{payload.username}' in region '{region}'")
     if not payload.text.strip():
@@ -757,11 +777,7 @@ def create_activity(
         
         # Invalidate cache
         try:
-            from app.utils.cache import global_cache
-            global_cache.delete(f"dashboard:{payload.username}")
-            global_cache.delete_pattern(f"forecast_{payload.username}")
-            global_cache.delete(f"habit_analysis_{payload.username}")
-            global_cache.delete_pattern(f"activities:{payload.username}*")
+            invalidate_user_caches(db, payload.username)
         except Exception as ce:
             logger.error(f"Failed to invalidate dashboard cache in create_activity: {ce}")
         
@@ -795,6 +811,7 @@ async def upload_multimodal(
         raise DatabaseUnavailableException("Database temporarily unavailable. Read-only mode active.")
     start_time = time.time()
     username = enforce_user_context(username, current_user)
+    file.filename = sanitize_filename(file.filename)
     logger.info(f"Incoming log activity request for multimodal upload: '{file.filename}' for user '{username}'")
     
     # 1. OCR File Type & Size Validation
@@ -884,11 +901,7 @@ async def upload_multimodal(
 
         # Invalidate cache
         try:
-            from app.utils.cache import global_cache
-            global_cache.delete(f"dashboard:{username}")
-            global_cache.delete_pattern(f"forecast_{username}")
-            global_cache.delete(f"habit_analysis_{username}")
-            global_cache.delete_pattern(f"activities:{username}*")
+            invalidate_user_caches(db, username)
         except Exception as ce:
             logger.error(f"Failed to invalidate dashboard cache in upload_multimodal: {ce}")
 
@@ -1039,6 +1052,7 @@ def post_chat_query(payload: ChatRequest, request: Request, db: Session = Depend
     Unifies memory lookup and outputs a customized response.
     """
     payload.username = enforce_user_context(payload.username, current_user)
+    payload.message = sanitize_text(payload.message)
     check_rate_limit(request, payload.username, "/chat", limit=60)
     try:
         user = get_or_create_user(db, payload.username)
@@ -1437,7 +1451,7 @@ def get_dashboard_summary(username: str = "demo_user", db: Session = Depends(get
 
         response_data = {
             "success": True,
-            "data": {
+            "summary": {
                 "success": True,
                 "today_emissions": round(today_emissions, 3),
                 "yesterday_emissions": round(yesterday_emissions, 3),
@@ -1479,7 +1493,7 @@ def get_dashboard_summary(username: str = "demo_user", db: Session = Depends(get
         }
 
         response_data["performance_breakdown"] = performance_breakdown
-        response_data["data"]["performance_breakdown"] = performance_breakdown
+        response_data["summary"]["performance_breakdown"] = performance_breakdown
 
         logger.info(
             f"Dashboard summary completed. DB Query: {db_duration_ms:.2f}ms, "
@@ -1496,7 +1510,7 @@ def get_dashboard_summary(username: str = "demo_user", db: Session = Depends(get
         logger.error(f"Critical error aggregating dashboard summary: {str(e)}\n{traceback.format_exc()}")
         return {
             "success": True,
-            "data": {
+            "summary": {
                 "success": False,
                 "today_emissions": 0.0,
                 "yesterday_emissions": 0.0,
@@ -2464,8 +2478,16 @@ def get_gamification_profile(
 ):
     username = enforce_user_context(username, current_user)
     check_rate_limit(request, username, "/gamification/profile", limit=60)
+    
+    from app.utils.cache import global_cache
+    cache_key = f"gamification_profile:{username}"
+    cached_data = global_cache.get(cache_key)
+    if cached_data is not None:
+        return {"success": True, "status": "success", "data": cached_data}
+        
     try:
         data = gamification_service.get_profile(username, db=db)
+        global_cache.set(cache_key, data, ttl=60)
         return {"success": True, "status": "success", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
@@ -2479,8 +2501,16 @@ def get_gamification_achievements(
 ):
     username = enforce_user_context(username, current_user)
     check_rate_limit(request, username, "/gamification/achievements", limit=60)
+    
+    from app.utils.cache import global_cache
+    cache_key = f"gamification_achievements:{username}"
+    cached_data = global_cache.get(cache_key)
+    if cached_data is not None:
+        return {"success": True, "status": "success", "data": cached_data}
+        
     try:
         data = gamification_service.get_achievements(username, db=db)
+        global_cache.set(cache_key, data, ttl=60)
         return {"success": True, "status": "success", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
@@ -2494,8 +2524,16 @@ def get_gamification_challenges(
 ):
     username = enforce_user_context(username, current_user)
     check_rate_limit(request, username, "/gamification/challenges", limit=60)
+    
+    from app.utils.cache import global_cache
+    cache_key = f"gamification_challenges:{username}"
+    cached_data = global_cache.get(cache_key)
+    if cached_data is not None:
+        return {"success": True, "status": "success", "data": cached_data}
+        
     try:
         data = gamification_service.get_challenges(username, db=db)
+        global_cache.set(cache_key, data, ttl=60)
         return {"success": True, "status": "success", "data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
@@ -2536,13 +2574,22 @@ def redeem_gamification_reward(
 @router.get("/database/status")
 def get_database_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
-    Returns the database connectivity, connection count, table count, and migration status.
+    Returns the database connectivity, connection count, table count, migration status,
+    and extensive pool utilization metrics.
     """
     from app.database import session as db_session
+    from app.database.session import get_db_pool_status
     from sqlalchemy import text, inspect
     
     if db_session.OFFLINE_MODE:
         return {
+            "status": "degraded",
+            "latency_ms": 0.0,
+            "pool_usage": 0.0,
+            "active_connections": 0,
+            "idle_connections": 0,
+            "uptime": "0s",
+            "version": "Offline Fallback",
             "success": True,
             "database_online": False,
             "connection_count": 0,
@@ -2551,19 +2598,10 @@ def get_database_status(db: Session = Depends(get_db), current_user: User = Depe
         }
         
     try:
-        db.execute(text("SELECT 1"))
-        database_online = True
+        # Get advanced metrics
+        metrics = get_db_pool_status(db)
         
-        db_driver = db.bind.dialect.name
-        connection_count = 1
-        if db_driver == "postgresql":
-            try:
-                connection_count = db.execute(text(
-                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
-                )).scalar()
-            except Exception:
-                connection_count = 1
-                
+        # Calculate legacy metrics
         inspector = inspect(db.bind)
         existing_tables = inspector.get_table_names()
         table_count = len(existing_tables)
@@ -2583,15 +2621,29 @@ def get_database_status(db: Session = Depends(get_db), current_user: User = Depe
             migration_status = f"missing_tables: {list(missing_tables)}"
             
         return {
+            "status": metrics["status"],
+            "latency_ms": metrics["latency_ms"],
+            "pool_usage": metrics["pool_usage"],
+            "active_connections": metrics["active_connections"],
+            "idle_connections": metrics["idle_connections"],
+            "uptime": metrics["uptime"],
+            "version": metrics["version"],
             "success": True,
-            "database_online": database_online,
-            "connection_count": connection_count,
+            "database_online": metrics["status"] == "healthy",
+            "connection_count": metrics["active_connections"] + metrics["idle_connections"],
             "table_count": table_count,
             "migration_status": migration_status
         }
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
         return {
+            "status": "unhealthy",
+            "latency_ms": 0.0,
+            "pool_usage": 0.0,
+            "active_connections": 0,
+            "idle_connections": 0,
+            "uptime": "0s",
+            "version": "Unknown",
             "success": False,
             "database_online": False,
             "connection_count": 0,
@@ -2613,28 +2665,42 @@ class LogoutRequest(BaseModel):
 
 @auth_router.post("/register")
 def register_user_endpoint(payload: UserRegisterRequest, request: Request, db: Session = Depends(get_db)):
-    check_rate_limit(request, "anonymous", "/auth/register", limit=20)
+    check_rate_limit(request, "anonymous", "/auth/register", limit=3, period=60)
     auth_service = AuthService(db)
     user = auth_service.register_user(payload)
+    client_ip = request.client.host if request.client else "unknown"
+    log_security_audit("REGISTRATION", user.username, client_ip, "/auth/register")
     return {"success": True, "message": "User registered successfully", "user": {"username": user.username, "email": user.email}}
 
 @auth_router.post("/login")
 def login_user_endpoint(payload: UserLoginRequest, request: Request, db: Session = Depends(get_db)):
-    check_rate_limit(request, "anonymous", "/auth/login", limit=20)
+    check_rate_limit(request, "anonymous", "/auth/login", limit=5, period=60)
     auth_service = AuthService(db)
-    token_data = auth_service.login_user(payload)
-    return {"success": True, "data": token_data}
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        token_data = auth_service.login_user(payload)
+        log_security_audit("LOGIN", payload.email or "unknown", client_ip, "/auth/login", {"status": "success"})
+        return {"success": True, "data": token_data}
+    except Exception as e:
+        log_security_audit("FAILED_LOGIN", payload.email or "unknown", client_ip, "/auth/login", {"error": str(e)})
+        raise e
 
 @auth_router.post("/request-reset")
-def request_reset_endpoint(payload: PasswordResetRequest, db: Session = Depends(get_db)):
+def request_reset_endpoint(payload: PasswordResetRequest, request: Request, db: Session = Depends(get_db)):
+    check_rate_limit(request, "anonymous", "/auth/request-reset", limit=3, period=60)
     auth_service = AuthService(db)
     res = auth_service.request_reset(payload.email)
+    client_ip = request.client.host if request.client else "unknown"
+    log_security_audit("RESET_REQUEST", payload.email, client_ip, "/auth/request-reset")
     return res
 
 @auth_router.post("/confirm-reset")
-def confirm_reset_endpoint(payload: PasswordResetConfirm, db: Session = Depends(get_db)):
+def confirm_reset_endpoint(payload: PasswordResetConfirm, request: Request, db: Session = Depends(get_db)):
+    check_rate_limit(request, "anonymous", "/auth/confirm-reset", limit=3, period=60)
     auth_service = AuthService(db)
     success = auth_service.confirm_reset(payload.token, payload.new_password)
+    client_ip = request.client.host if request.client else "unknown"
+    log_security_audit("RESET_CONFIRM", "unknown", client_ip, "/auth/confirm-reset", {"success": success})
     return {"success": success, "message": "Password reset confirmed successfully"}
 
 @auth_router.post("/logout")
@@ -2645,6 +2711,7 @@ def logout_endpoint(
     current_user: User = Depends(get_current_user)
 ):
     from app.auth.jwt_service import JWTService
+    client_ip = request.client.host if request.client else "unknown"
     
     # 1. Blacklist access token
     auth_header = request.headers.get("Authorization")
@@ -2656,20 +2723,24 @@ def logout_endpoint(
     if payload.refresh_token:
         JWTService.blacklist_token(payload.refresh_token)
         
+    log_security_audit("LOGOUT", current_user.username, client_ip, "/auth/logout")
     return {"success": True, "message": "Successfully logged out and tokens invalidated."}
 
 @auth_router.post("/refresh")
-def refresh_token_endpoint(payload: RefreshTokenRequest, db: Session = Depends(get_db)):
+def refresh_token_endpoint(payload: RefreshTokenRequest, request: Request, db: Session = Depends(get_db)):
     from app.auth.jwt_service import JWTService
     from app.models.models import User
+    client_ip = request.client.host if request.client else "unknown"
     
     # 1. Check if token is blacklisted
     if JWTService.is_blacklisted(payload.refresh_token):
+        log_security_audit("TOKEN_REVOCATION", "unknown", client_ip, "/auth/refresh", {"reason": "blacklisted_token"})
         raise HTTPException(status_code=401, detail="Refresh token has been invalidated or rotated.")
         
     # 2. Decode refresh token
     token_payload = JWTService.decode_token(payload.refresh_token)
     if token_payload is None or token_payload.get("refresh") is not True:
+        log_security_audit("TOKEN_REVOCATION", "unknown", client_ip, "/auth/refresh", {"reason": "invalid_refresh_token"})
         raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
         
     username = token_payload.get("sub")
@@ -2688,6 +2759,7 @@ def refresh_token_endpoint(payload: RefreshTokenRequest, db: Session = Depends(g
     new_access_token = JWTService.create_access_token({"sub": user.username})
     new_refresh_token = JWTService.create_refresh_token({"sub": user.username})
     
+    log_security_audit("TOKEN_REFRESH", user.username, client_ip, "/auth/refresh")
     return {
         "success": True,
         "access_token": new_access_token,
@@ -2724,12 +2796,21 @@ def get_profile_endpoint(
     current_user: User = Depends(get_current_user)
 ):
     check_rate_limit(request, current_user.username, "/profile", limit=60)
+    
+    from app.utils.cache import global_cache
+    cache_key = f"profile_data:{current_user.username}"
+    cached_profile = global_cache.get(cache_key)
+    if cached_profile is not None:
+        return {"success": True, "data": cached_profile}
+        
     logger.info(f"GET /profile: Active User Session user_id={current_user.id}, username='{current_user.username}', email='{current_user.email}'")
     from app.services.profile_service import ProfileService
     profile_service = ProfileService(db)
     logger.info(f"GET /profile: Querying profile database record for user_id={current_user.id}")
     profile_data = profile_service.get_or_create_profile(current_user)
     response_payload = {"success": True, "data": profile_data}
+    
+    global_cache.set(cache_key, profile_data, ttl=60)
     logger.info(f"GET /profile: Completed successfully. Response data: {response_payload}")
     return response_payload
 
@@ -2742,12 +2823,23 @@ def update_profile_endpoint(
 ):
     check_rate_limit(request, current_user.username, "/profile", limit=60)
     payload_data = payload.dict(exclude_unset=True)
+    # Sanitize string inputs
+    for k, v in payload_data.items():
+        if isinstance(v, str):
+            payload_data[k] = sanitize_text(v)
+            
     logger.info(f"PUT /profile: Active User Session user_id={current_user.id}, username='{current_user.username}'")
     logger.info(f"PUT /profile: Incoming request body: {payload_data}")
     from app.services.profile_service import ProfileService
     profile_service = ProfileService(db)
     logger.info(f"PUT /profile: Staging and executing database updates for user_id={current_user.id}")
     updated_data = profile_service.update_profile(current_user, payload_data)
+    client_ip = request.client.host if request.client else "unknown"
+    log_security_audit("PROFILE_UPDATE", current_user.username, client_ip, "/profile", {"fields": list(payload_data.keys())})
+    
+    # Invalidate profile and related caches
+    invalidate_user_caches(db, current_user.username)
+    
     response_payload = {"success": True, "message": "Profile updated successfully", "data": updated_data}
     logger.info(f"PUT /profile: Completed successfully. Response data: {response_payload}")
     return response_payload
@@ -2760,6 +2852,7 @@ async def upload_profile_avatar(
     current_user: User = Depends(get_current_user)
 ):
     check_rate_limit(request, current_user.username, "/profile/avatar", limit=20)
+    file.filename = sanitize_filename(file.filename)
     logger.info(f"POST /profile/avatar: Active User Session user_id={current_user.id}, username='{current_user.username}'")
     logger.info(f"POST /profile/avatar: Received file upload '{file.filename}', content_type='{file.content_type}'")
     
@@ -2794,6 +2887,9 @@ async def upload_profile_avatar(
     profile_service = ProfileService(db)
     logger.info(f"POST /profile/avatar: Staging and executing database avatar update to url='{avatar_url}' for user_id={current_user.id}")
     updated_data = profile_service.update_avatar(current_user, avatar_url)
+    
+    # Invalidate caches
+    invalidate_user_caches(db, current_user.username)
     
     response_payload = {"success": True, "message": "Avatar uploaded successfully", "data": updated_data}
     logger.info(f"POST /profile/avatar: Completed successfully. Response data: {response_payload}")

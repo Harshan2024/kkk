@@ -54,13 +54,11 @@ def validate_environment_on_startup():
     import logging
     logger = logging.getLogger("carbontracker.config")
     
-    # Critical security check: Reject default SECRET_KEY in production
-    if settings.ENVIRONMENT == "production" and settings.SECRET_KEY == "super_secret_carbontracker_development_key":
-        raise RuntimeError("CRITICAL CONFIGURATION ERROR: Default SECRET_KEY is not allowed in production mode.")
-        
+    if not settings.SECRET_KEY or settings.SECRET_KEY.strip() == "":
+        raise RuntimeError("CRITICAL CONFIGURATION ERROR: SECRET_KEY is missing or empty. Server cannot boot safely.")
+
     vars_to_check = {
         "DATABASE_URL": (os.getenv("DATABASE_URL"), "Database services disabled."),
-        "SECRET_KEY": (os.getenv("SECRET_KEY"), "Authentication services disabled."),
         "OPENAI_API_KEY": (os.getenv("OPENAI_API_KEY"), "AI services disabled."),
         "ENVIRONMENT": (os.getenv("ENVIRONMENT"), "Environment mode defaults to development.")
     }

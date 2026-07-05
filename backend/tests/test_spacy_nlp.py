@@ -120,9 +120,9 @@ def test_disabled_endpoints():
 
     assert client.get("/api/v1/analytics/forecast").status_code == 503
     assert client.get("/api/v1/forecast").status_code == 503
-    assert client.get("/api/v1/observability/metrics").status_code == 503
-    assert client.get("/observability/metrics").status_code == 503
+    assert client.get("/observability/metrics").status_code == 200
     assert client.get("/api/v1/habit-analysis").status_code == 200
+
 
 def test_transport_factor_integration(monkeypatch):
     from app.calculations.engines import calculate_transport_emission

@@ -113,6 +113,32 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     log_structured("INFO", "main", "CarbonTracker AI Backend — Shutting down gracefully.")
+    
+    # 1. Close database pools
+    try:
+        from app.database.session import engine, async_engine
+        engine.dispose()
+        # Dispose async engine (coroutine)
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(async_engine.dispose())
+            else:
+                asyncio.run(async_engine.dispose())
+        except Exception:
+            pass
+        print("Database connection pools closed.")
+    except Exception as e:
+        print(f"Error closing database pools during shutdown: {e}")
+
+    # 2. Close active HTTP clients / background executor threads
+    try:
+        from app.utils.circuit_breaker import CircuitBreaker
+        CircuitBreaker._executor.shutdown(wait=True)
+        print("Background thread executors stopped.")
+    except Exception as e:
+        print(f"Error shutting down circuit breaker executor: {e}")
 
 
 app = FastAPI(
@@ -130,6 +156,21 @@ from fastapi.exceptions import RequestValidationError
 from app.utils.logger import log_structured, request_id_var
 from app.utils.rate_limiter import RateLimitExceeded
 from app.utils.safe_db import DatabaseUnavailableException
+from datetime import datetime, timezone
+
+def format_error_response(status_code: int, error: str, message: str, path: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "success": False,
+            "error": error,
+            "message": message,
+            "request_id": request_id_var.get() or "REQ-SYSTEM",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "path": path,
+            "status_code": status_code
+        }
+    )
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -140,48 +181,38 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         msg = err.get("msg", "Invalid input")
         clean_errors.append(f"{loc}: {msg}")
     
-    return JSONResponse(
+    return format_error_response(
         status_code=400,
-        content={
-            "success": False,
-            "error": "Bad Request",
-            "message": "Validation error: " + "; ".join(clean_errors),
-            "request_id": request_id_var.get()
-        }
+        error="Bad Request",
+        message="Validation error: " + "; ".join(clean_errors),
+        path=request.url.path
     )
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    return JSONResponse(
+    return format_error_response(
         status_code=exc.status_code,
-        content={
-            "success": False,
-            "error": exc.detail,
-            "message": exc.detail,
-            "request_id": request_id_var.get()
-        }
+        error=exc.detail,
+        message=exc.detail,
+        path=request.url.path
     )
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
-    return JSONResponse(
+    return format_error_response(
         status_code=429,
-        content={
-            "success": False,
-            "error": "Rate limit exceeded",
-            "request_id": request_id_var.get()
-        }
+        error="Rate limit exceeded",
+        message=exc.message if hasattr(exc, "message") else "Rate limit exceeded",
+        path=request.url.path
     )
 
 @app.exception_handler(DatabaseUnavailableException)
 async def database_unavailable_handler(request: Request, exc: DatabaseUnavailableException):
-    return JSONResponse(
+    return format_error_response(
         status_code=503,
-        content={
-            "success": False,
-            "error": "Database temporarily unavailable. Read-only mode active.",
-            "request_id": request_id_var.get()
-        }
+        error="Database temporarily unavailable. Read-only mode active.",
+        message="The database is offline. We are running in safe read-only mode.",
+        path=request.url.path
     )
 
 @app.exception_handler(Exception)
@@ -205,15 +236,11 @@ async def global_exception_handler(request: Request, exc: Exception):
         exception=exc
     )
     
-    # Return safe JSON
-    return JSONResponse(
+    return format_error_response(
         status_code=500,
-        content={
-            "success": False,
-            "error": "Internal server error",
-            "message": "An unexpected error occurred.",
-            "request_id": request_id_var.get()
-        }
+        error="Internal server error",
+        message="An unexpected error occurred.",
+        path=endpoint
     )
 
 async def set_body(request: Request, body: bytes):
@@ -278,13 +305,69 @@ async def request_id_middleware(request: Request, call_next):
 @app.middleware("http")
 async def request_timing_middleware(request: Request, call_next):
     import time
+    import jwt
+    from app.config.config import settings
+    
     start_time = time.perf_counter()
     response = await call_next(request)
     process_time = (time.perf_counter() - start_time) * 1000
     
-    log_msg = f"{request.method} {request.url.path} {int(process_time)}ms"
-    print(log_msg)
+    user_id = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            user_id = payload.get("sub") or payload.get("user_id")
+        except Exception:
+            pass
+
+    log_structured(
+        level="INFO",
+        service="request_logger",
+        message=f"{request.method} {request.url.path} resolved in {process_time:.2f}ms with status {response.status_code}",
+        context={
+            "method": request.method,
+            "endpoint": request.url.path,
+            "status_code": response.status_code,
+            "duration_ms": round(process_time, 2),
+            "user_id": user_id,
+            "request_id": request_id_var.get()
+        }
+    )
+    # Record into observability metrics
+    try:
+        from app.utils.metrics import obs_metrics
+        obs_metrics.record_request(request.url.path, response.status_code, round(process_time, 2))
+    except Exception:
+        pass
     return response
+
+@app.middleware("http")
+async def add_security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    
+    # Strict but compatible Content Security Policy (CSP)
+    csp_directives = (
+        "default-src 'self'; "
+        "img-src 'self' data: blob:; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "connect-src 'self' http://localhost:8001 http://127.0.0.1:8001 http://localhost:3001 http://localhost:3000 http://127.0.0.1:3000 http://127.0.0.1:3001; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval';"
+    )
+    response.headers["Content-Security-Policy"] = csp_directives
+    return response
+
+from fastapi.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CORS — supports all standard local ports for development
@@ -569,11 +652,113 @@ def trigger_mock_failure(service: str):
 
 @app.get("/observability/metrics")
 def get_flat_observability_metrics():
-    from fastapi import HTTPException
-    raise HTTPException(
-        status_code=503,
-        detail="Observability metrics endpoint temporarily disabled during stabilization sprint."
+    """Full observability metrics: system counters, per-endpoint stats, cache ratios, auth events."""
+    from app.utils.metrics import obs_metrics
+    return obs_metrics.get_summary()
+
+
+@app.get("/api/v1/admin/health-dashboard")
+def get_health_dashboard():
+    """
+    Unified health dashboard with traffic-light indicators.
+    Returns green/yellow/red status for all system components.
+    """
+    from app.utils.cache import global_cache
+    from app.utils.metrics import obs_metrics
+    from app.utils.notifier import get_notification_status
+    import psutil, os
+
+    def traffic_light(healthy: bool, degraded: bool = False) -> str:
+        if healthy:
+            return "green"
+        if degraded:
+            return "yellow"
+        return "red"
+
+    # ── Database ────────────────────────────────────────────────────────────
+    if db_session.OFFLINE_MODE:
+        db_status = "offline_safe_mode"
+        db_light = "yellow"
+    else:
+        from app.database.session import check_database_health_throttled
+        db_ok = check_database_health_throttled()
+        db_light = traffic_light(db_ok)
+        db_status = "online" if db_ok else "offline"
+
+    # ── Cache ───────────────────────────────────────────────────────────────
+    cache_status = global_cache.validate()
+    cache_light = traffic_light(cache_status == "healthy", cache_status == "degraded")
+
+    # ── AI ──────────────────────────────────────────────────────────────────
+    try:
+        from app.ai.embeddings.embeddings import get_embedding
+        ai_ok = bool(get_embedding("ping"))
+        ai_light = "green" if ai_ok else "yellow"
+        ai_status = "online" if ai_ok else "degraded"
+    except Exception:
+        ai_light = "yellow"
+        ai_status = "degraded"
+
+    # ── System Resources ────────────────────────────────────────────────────
+    try:
+        mem = psutil.virtual_memory()
+        cpu_pct = psutil.cpu_percent(interval=0.1)
+        disk = psutil.disk_usage("/")
+        mem_pct = mem.percent
+        disk_pct = disk.percent
+        resource_light = "green"
+        if mem_pct > 85 or cpu_pct > 90 or disk_pct > 90:
+            resource_light = "red"
+        elif mem_pct > 70 or cpu_pct > 75 or disk_pct > 80:
+            resource_light = "yellow"
+        resources = {
+            "cpu_pct": cpu_pct,
+            "memory_pct": mem_pct,
+            "disk_pct": disk_pct,
+            "memory_used_mb": round(mem.used / 1024 / 1024, 1),
+            "memory_total_mb": round(mem.total / 1024 / 1024, 1),
+        }
+    except Exception:
+        resource_light = "yellow"
+        resources = {"note": "psutil unavailable"}
+
+    # ── Metrics snapshot ─────────────────────────────────────────────────────
+    metrics = obs_metrics.get_metrics()
+    circuit_breaker_light = "red" if metrics["circuit_breaker_opens"] > 10 else (
+        "yellow" if metrics["circuit_breaker_opens"] > 3 else "green"
     )
+
+    # ── Overall system status ────────────────────────────────────────────────
+    lights = [db_light, cache_light, resource_light, circuit_breaker_light]
+    if "red" in lights:
+        overall = "critical"
+    elif "yellow" in lights:
+        overall = "warning"
+    else:
+        overall = "healthy"
+
+    return {
+        "status": overall,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "uptime_seconds": obs_metrics.uptime_seconds(),
+        "components": {
+            "backend": {"status": "online", "indicator": "green"},
+            "database": {"status": db_status, "indicator": db_light},
+            "cache": {"status": cache_status, "indicator": cache_light},
+            "ai_engine": {"status": ai_status, "indicator": ai_light},
+            "circuit_breakers": {
+                "status": "warning" if metrics["circuit_breaker_opens"] > 3 else "ok",
+                "indicator": circuit_breaker_light,
+                "opens": metrics["circuit_breaker_opens"]
+            },
+            "resources": {
+                "indicator": resource_light,
+                **resources
+            },
+        },
+        "metrics": metrics,
+        "notifications": get_notification_status(),
+    }
 
 
 @app.get("/")

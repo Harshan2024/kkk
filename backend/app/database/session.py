@@ -12,8 +12,10 @@ import logging
 from sqlalchemy import create_engine, text, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.exc import OperationalError, DBAPIError
 from app.config.config import settings
-from app.utils.logger import log_structured
+from app.utils.logger import log_structured, request_id_var
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -28,9 +30,20 @@ def register_engine_events(bind_engine):
     def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
         if hasattr(context, "_query_start_time"):
             total_time = (time.perf_counter() - context._query_start_time) * 1000
-            if total_time > 500:
-                log_structured("WARNING", "database_query", f"Query exceeded 500ms: {statement} took {total_time:.2f}ms")
-                print(f"[WARNING] Database query exceeded 500ms: {total_time:.2f}ms for: {statement[:200]}")
+            if total_time > 100:
+                req_id = request_id_var.get()
+                log_structured(
+                    level="WARNING",
+                    service="database_query",
+                    message=f"Slow query detected: {total_time:.2f}ms",
+                    context={
+                        "sql": statement,
+                        "duration_ms": total_time,
+                        "parameters": str(parameters),
+                        "request_id": req_id
+                    }
+                )
+                print(f"[WARNING] Database query exceeded 100ms: {total_time:.2f}ms for: {statement[:200]}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OFFLINE SAFE MODE
@@ -39,6 +52,15 @@ def register_engine_events(bind_engine):
 # ─────────────────────────────────────────────────────────────────────────────
 OFFLINE_MODE = False
 READ_ONLY_MODE = False
+
+DATABASE_URL_SYNC = settings.DATABASE_URL
+DATABASE_URL_ASYNC = settings.DATABASE_URL
+
+if DATABASE_URL_ASYNC:
+    if DATABASE_URL_ASYNC.startswith("postgresql://"):
+        DATABASE_URL_ASYNC = DATABASE_URL_ASYNC.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif DATABASE_URL_ASYNC.startswith("postgresql+psycopg2://"):
+        DATABASE_URL_ASYNC = DATABASE_URL_ASYNC.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
 
 if not settings.DATABASE_URL:
     log_structured(
@@ -51,25 +73,40 @@ if not settings.DATABASE_URL:
     )
     OFFLINE_MODE = True
     READ_ONLY_MODE = True
-    _DB_URL = "sqlite://"  # In-memory SQLite — ephemeral but allows startup
+    _DB_URL = "sqlite://"
     engine = create_engine(
         _DB_URL,
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     register_engine_events(engine)
+    async_engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        poolclass=StaticPool,
+    )
 else:
     try:
-        # Create SQLAlchemy engine with resilient connection pooling
-        engine = create_engine(
-            settings.DATABASE_URL,
-            pool_pre_ping=True,
-            pool_size=50,
-            max_overflow=25,
-            pool_recycle=300,
-            pool_timeout=10,
-            connect_args={"connect_timeout": 10},
-        )
+        is_sqlite = DATABASE_URL_SYNC and "sqlite" in DATABASE_URL_SYNC
+        if is_sqlite:
+            connect_args = {"check_same_thread": False}
+            engine = create_engine(
+                DATABASE_URL_SYNC,
+                connect_args=connect_args,
+                poolclass=StaticPool,
+            )
+        else:
+            connect_args = {"connect_timeout": 10}
+            if DATABASE_URL_SYNC and DATABASE_URL_SYNC.startswith("postgresql"):
+                connect_args["options"] = "-c statement_timeout=2000"
+            engine = create_engine(
+                DATABASE_URL_SYNC,
+                pool_pre_ping=True,
+                pool_size=20,
+                max_overflow=40,
+                pool_recycle=1800,
+                pool_timeout=30,
+                connect_args=connect_args,
+            )
         register_engine_events(engine)
     except Exception as e:
         log_structured(
@@ -87,7 +124,36 @@ else:
         )
         register_engine_events(engine)
 
+    try:
+        is_sqlite_async = DATABASE_URL_ASYNC and "sqlite" in DATABASE_URL_ASYNC
+        if is_sqlite_async:
+            async_engine = create_async_engine(
+                DATABASE_URL_ASYNC,
+                poolclass=StaticPool,
+            )
+        else:
+            async_engine = create_async_engine(
+                DATABASE_URL_ASYNC,
+                pool_pre_ping=True,
+                pool_size=20,
+                max_overflow=40,
+                pool_recycle=1800,
+                pool_timeout=30,
+            )
+    except Exception as e:
+        log_structured(
+            level="ERROR",
+            service="database_session",
+            message=f"Failed to create SQLAlchemy async engine: {e}. Using SQLite fallback.",
+            exception=e
+        )
+        async_engine = create_async_engine(
+            "sqlite+aiosqlite://",
+            poolclass=StaticPool,
+        )
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+AsyncSessionLocal = async_sessionmaker(async_engine, expire_on_commit=False)
 Base = declarative_base()
 
 
@@ -144,6 +210,7 @@ def verify_database_connection(retries: int = 3, base_delay: float = 0.5) -> boo
             print(f"Database Connection Time: {elapsed_time:.2f}ms")
             log_structured("INFO", "database_session", f"Database Connection Time: {elapsed_time:.2f}ms")
             LAST_DB_CHECK_RESULT = True
+            READ_ONLY_MODE = False
             return True
         except Exception as e:
             delay = base_delay * (2 ** (attempt - 1))
@@ -211,6 +278,41 @@ def check_database_health_throttled() -> bool:
     return LAST_DB_CHECK_RESULT
 
 
+def execute_with_retry(db_session, func, *args, **kwargs):
+    """
+    Executes db function with up to 3 reconnection attempts using exponential backoff.
+    Used for query retry on lost connection.
+    """
+    max_attempts = 3
+    base_delay = 1.0
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return func(db_session, *args, **kwargs)
+        except (OperationalError, DBAPIError) as e:
+            err_msg = str(e).lower()
+            is_conn_error = any(x in err_msg for x in [
+                "connection lost", "lost connection", "closed by", 
+                "server closed", "closed connection", "is closed",
+                "could not connect", "terminating connection", "handshake"
+            ])
+            if is_conn_error and attempt < max_attempts:
+                delay = base_delay * (2 ** (attempt - 1))
+                log_structured(
+                    level="WARNING",
+                    service="database_session",
+                    message=f"Database connection error detected. Reconnect attempt {attempt}/{max_attempts} in {delay:.1f}s...",
+                    context={"error": str(e), "request_id": request_id_var.get()}
+                )
+                time.sleep(delay)
+                # Force pool discard/refresh by running pre-ping check
+                try:
+                    with engine.connect() as conn:
+                        conn.execute(text("SELECT 1"))
+                except Exception:
+                    pass
+            else:
+                raise e
+
 
 def get_db():
     """
@@ -219,7 +321,18 @@ def get_db():
     """
     db = SessionLocal()
     try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        # DB connection failed, try reconnecting
+        verify_database_connection(retries=3, base_delay=0.5)
+    try:
         yield db
+        if db.is_active:
+            db.commit()
+    except Exception as e:
+        if db.is_active:
+            db.rollback()
+        raise e
     finally:
         try:
             db.close()
@@ -325,3 +438,76 @@ def sync_database_schema(bind_engine) -> None:
                             log_structured("ERROR", "database_session", f"Failed to add '{col_name}' to users: {e}", exception=e)
     except Exception as e:
         log_structured("ERROR", "database_session", f"Schema sync failed for users: {e}", exception=e)
+
+
+APP_STARTUP_TIME = time.time()
+
+def get_db_pool_status(db):
+    """
+    Computes detailed database metrics: latency, pool utilization, active/idle connections,
+    uptime, and postgres version.
+    """
+    if OFFLINE_MODE:
+        return {
+            "status": "degraded",
+            "latency_ms": 0.0,
+            "pool_usage": 0.0,
+            "active_connections": 0,
+            "idle_connections": 0,
+            "uptime": "0s",
+            "version": "Offline Fallback"
+        }
+
+    t0 = time.perf_counter()
+    try:
+        db.execute(text("SELECT 1"))
+        latency = (time.perf_counter() - t0) * 1000
+        status = "healthy"
+    except Exception:
+        latency = 0.0
+        status = "unhealthy"
+
+    pool = engine.pool
+    pool_size = pool.size() if hasattr(pool, "size") else 20
+    checked_out = pool.checkedout() if hasattr(pool, "checkedout") else 0
+    pool_usage_pct = (checked_out / pool_size * 100) if pool_size > 0 else 0.0
+
+    active_connections = checked_out
+    idle_connections = 0
+    version = "SQLite"
+
+    if db.bind.dialect.name == "postgresql":
+        try:
+            active_connections = db.execute(text(
+                "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND datname = current_database()"
+            )).scalar() or checked_out
+            idle_connections = db.execute(text(
+                "SELECT count(*) FROM pg_stat_activity WHERE state = 'idle' AND datname = current_database()"
+            )).scalar() or 0
+            version_str = db.execute(text("SELECT version()")).scalar() or "PostgreSQL"
+            version = version_str.split("on")[0].strip()
+        except Exception:
+            pass
+
+    uptime_seconds = int(time.time() - APP_STARTUP_TIME)
+    days = uptime_seconds // 86400
+    hours = (uptime_seconds % 86400) // 3600
+    minutes = (uptime_seconds % 3600) // 60
+    seconds = uptime_seconds % 60
+    
+    uptime_parts = []
+    if days > 0: uptime_parts.append(f"{days}d")
+    if hours > 0: uptime_parts.append(f"{hours}h")
+    if minutes > 0: uptime_parts.append(f"{minutes}m")
+    uptime_parts.append(f"{seconds}s")
+    uptime_str = " ".join(uptime_parts)
+
+    return {
+        "status": status,
+        "latency_ms": round(latency, 2),
+        "pool_usage": round(pool_usage_pct, 2),
+        "active_connections": active_connections,
+        "idle_connections": idle_connections,
+        "uptime": uptime_str,
+        "version": version
+    }

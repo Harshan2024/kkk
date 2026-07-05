@@ -6,6 +6,10 @@ import {
   ResponsiveContainer, BarChart, Bar, Cell, XAxis, YAxis, 
   CartesianGrid, Tooltip as ChartTooltip, AreaChart, Area 
 } from "recharts";
+import { useAIStore } from "../stores/aiStore";
+import { Card } from "./ui/Card";
+import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
 
 interface Device {
   name: string;
@@ -13,8 +17,6 @@ interface Device {
   status: "online" | "offline";
   consumption: string;
 }
-
-import { useAIStore } from "../stores/aiStore";
 
 export default function IoTDashboard() {
   const { systemHealth } = useAIStore();
@@ -26,33 +28,13 @@ export default function IoTDashboard() {
   const [cumulativeEnergy, setCumulativeEnergy] = useState(15.204);
   const [lastTickTime, setLastTickTime] = useState("");
 
-  // 1. Error State (IoT Offline)
-  if (iotStatus === "offline") {
-    return (
-      <div className="glass-card rounded-3xl p-6 sm:p-8 min-h-[400px] flex flex-col items-center justify-center select-none text-center relative border border-rose-500/20 bg-rose-500/10">
-        <span className="text-xs font-black uppercase tracking-wider text-rose-400">
-          Device connection unavailable.
-        </span>
-      </div>
-    );
-  }
-
-  const showDegraded = iotStatus === "degraded";
-
-  // Simulated telemetry loop representing active WebSocket/MQTT messages
+  // Simulated telemetry loop
   useEffect(() => {
     setLastTickTime(new Date().toLocaleTimeString());
     const interval = setInterval(() => {
-      // Fluctuations in Voltage (228 - 232 V)
       const newV = parseFloat((230 + (Math.random() * 4 - 2)).toFixed(1));
-      
-      // Fluctuations in Current (4.1 - 4.9 A)
       const newC = parseFloat((4.5 + (Math.random() * 0.8 - 0.4)).toFixed(2));
-      
-      // Compute power from new values
       const newPowerW = newV * newC;
-      
-      // Increment cumulative energy consumption (Power in kW * tick hours, say 3 seconds = 3/3600 h)
       const deltaKwh = (newPowerW / 1000) * (3.0 / 3600.0);
       
       setVoltage(newV);
@@ -76,7 +58,6 @@ export default function IoTDashboard() {
     { name: "EV Charger", type: "Vehicle Charger", status: "offline", consumption: "0 W" }
   ];
 
-  // Chart data 1: Energy Usage breakdown by Device
   const deviceBreakdownData = [
     { name: "AC Monitor", usage: 8.5, color: "#10b981" },
     { name: "Energy Plug", usage: 2.1, color: "#38bdf8" },
@@ -84,7 +65,6 @@ export default function IoTDashboard() {
     { name: "Misc load", usage: 1.2, color: "#64748b" }
   ];
 
-  // Chart data 2: Hourly trend of energy usage
   const trendData = [
     { hour: "12:00", load: 1.2, gen: 0.0 },
     { hour: "13:00", load: 1.4, gen: 1.5 },
@@ -98,16 +78,16 @@ export default function IoTDashboard() {
   const CustomChartTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
-        <div className="glass-card bg-[#0b120f]/95 px-3.5 py-2.5 rounded-xl border border-emerald-500/20 text-xs shadow-xl backdrop-blur-md font-sans">
-          <p className="font-extrabold text-[9px] text-stone-500 uppercase tracking-widest mb-1 pb-1 border-b border-white/5">{label}</p>
+        <div className="glass-premium px-3.5 py-2.5 rounded-xl text-xs border border-theme shadow-2xl font-sans">
+          <p className="font-extrabold text-[9px] text-theme-muted uppercase tracking-widest mb-1 pb-1 border-b border-white/5">{label}</p>
           <div className="space-y-1 font-bold">
             {payload.map((p: any, idx: number) => (
               <div key={idx} className="flex justify-between items-center gap-4">
-                <span className="text-stone-400 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color || p.fill }}></span>
+                <span className="text-theme-secondary flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color || p.fill }} />
                   {p.name}:
                 </span>
-                <span className="text-stone-200">{Number(p.value).toFixed(2)} kWh</span>
+                <span className="text-theme-primary">{Number(p.value).toFixed(2)} kWh</span>
               </div>
             ))}
           </div>
@@ -117,58 +97,70 @@ export default function IoTDashboard() {
     return null;
   };
 
+  if (iotStatus === "offline") {
+    return (
+      <Card className="min-h-[400px] flex flex-col items-center justify-center text-center relative border border-rose-500/20 bg-rose-500/10" hover={false}>
+        <span className="text-xs font-black uppercase tracking-wider text-rose-400">
+          Device Connection Unavailable
+        </span>
+      </Card>
+    );
+  }
+
+  const showDegraded = iotStatus === "degraded";
+
   return (
     <div className="space-y-5 select-none">
       {/* Title Header */}
       <div className="flex justify-between items-center pb-2">
         <div>
-          <h2 className="text-lg font-black uppercase tracking-wider text-white">Smart IoT Devices</h2>
-          <p className="text-[10px] text-stone-550 font-bold uppercase tracking-wider mt-0.5">Live energy telemetry and hardware orchestration</p>
+          <h2 className="text-lg font-black uppercase tracking-wider text-white font-display">Smart IoT Devices</h2>
+          <p className="text-[10px] text-theme-muted font-bold uppercase tracking-wider mt-0.5 font-sans">Live energy telemetry and hardware orchestration</p>
         </div>
         {showDegraded ? (
-          <div className="flex items-center space-x-2 text-[9px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg font-black uppercase tracking-wider animate-pulse">
-            <span>Running in degraded mode.</span>
-          </div>
+          <Badge variant="warning" size="sm" dot>degraded</Badge>
         ) : (
-          <div className="flex items-center space-x-2 text-[9px] text-emerald-450 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-lg font-black uppercase tracking-wider animate-pulse">
-            <RefreshCw className="w-3 h-3 animate-spin" />
-            <span>Real-time feed active: {lastTickTime}</span>
-          </div>
+          <Badge variant="success" size="sm" dot className="animate-pulse">
+            <span className="flex items-center gap-1.5">
+              <RefreshCw className="w-3 h-3 animate-spin" />
+              Feed active: {lastTickTime}
+            </span>
+          </Badge>
         )}
       </div>
 
-      {/* Grid: Status checklist on left, Live values in center/right */}
+      {/* Grid */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        {/* Connected Devices checklist (1/3) */}
-        <div className="glass-card rounded-3xl p-5 flex flex-col justify-between min-h-[300px]">
+        {/* Connected Devices */}
+        <Card className="flex flex-col justify-between min-h-[300px]" hover={false}>
           <div>
             <div className="flex items-center space-x-2.5 pb-3 border-b border-white/5 mb-3.5">
               <div className="w-6 h-6 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
                 <Cpu className="w-3.5 h-3.5 text-emerald-400" />
               </div>
-              <h3 className="font-extrabold text-xs text-stone-300 uppercase tracking-widest">
+              <h3 className="font-extrabold text-xs text-theme-secondary uppercase tracking-widest">
                 Connected Hardware
               </h3>
             </div>
 
             <div className="space-y-2">
               {devices.map((dev) => (
-                <div key={dev.name} className="flex items-center justify-between p-2 rounded-2xl border border-white/5 bg-white/[0.01]">
+                <div key={dev.name} className="flex items-center justify-between p-2 rounded-2xl border border-theme-subtle bg-white/[0.01]">
                   <div className="flex items-center space-x-3">
                     <div className={`w-2 h-2 rounded-full ${dev.status === "online" ? "bg-emerald-500 shadow-sm shadow-emerald-500" : "bg-stone-700"}`}></div>
                     <div>
-                      <h4 className="text-[11px] font-black text-white">{dev.name}</h4>
-                      <span className="text-[8px] text-stone-500 font-bold uppercase">{dev.type}</span>
+                      <h4 className="text-[11px] font-black text-theme-primary">{dev.name}</h4>
+                      <span className="text-[8px] text-theme-muted font-bold uppercase">{dev.type}</span>
                     </div>
                   </div>
                   <div className="text-right">
                     <span className={`text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded ${
-                      dev.status === "online" ? "text-emerald-400 bg-emerald-500/10" : "text-stone-500 bg-white/5"
+                      dev.status === "online" ? "text-emerald-450 bg-emerald-500/10" : "text-theme-muted bg-white/5"
                     }`}>
                       {dev.status}
                     </span>
                     {dev.status === "online" && (
-                      <span className="block text-[8px] text-stone-550 font-black uppercase mt-1">{dev.consumption}</span>
+                      <span className="block text-[8px] text-theme-muted font-black uppercase mt-1">{dev.consumption}</span>
                     )}
                   </div>
                 </div>
@@ -176,99 +168,99 @@ export default function IoTDashboard() {
             </div>
           </div>
 
-          <button className="mt-4 w-full py-2 bg-emerald-500 hover:bg-emerald-450 text-[#080d0a] rounded-xl text-[10px] font-black uppercase transition-all tracking-wider cursor-pointer shadow shadow-emerald-500/10">
+          <Button variant="primary" size="sm" className="mt-4 w-full">
             + Connect New Device
-          </button>
-        </div>
+          </Button>
+        </Card>
 
-        {/* Live Energy Telemetry Cards (2/3) */}
+        {/* Live Energy Telemetry Cards */}
         <div className="xl:col-span-2 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
           {/* Card 1: Voltage */}
-          <div className="glass-card rounded-2xl p-4.5 flex flex-col justify-between h-[135px]">
-            <span className="text-[9px] font-black uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5 text-stone-550" />
+          <Card className="flex flex-col justify-between h-[135px]" hover={false}>
+            <span className="text-[9px] font-black uppercase tracking-wider text-theme-muted flex items-center gap-1.5">
+              <Zap className="w-3.5 h-3.5 text-theme-muted" />
               Line Voltage
             </span>
             <div className="my-2">
-              <div className="text-3xl font-black text-white font-sans">{voltage.toFixed(1)} <span className="text-xs text-stone-550">V</span></div>
-              <span className="text-[8px] text-stone-605 font-bold block mt-1 uppercase">Standard single-phase supply</span>
+              <div className="text-3xl font-black text-theme-primary font-display">{voltage.toFixed(1)} <span className="text-xs text-theme-muted">V</span></div>
+              <span className="text-[8px] text-theme-muted font-bold block mt-1 uppercase">Standard single-phase supply</span>
             </div>
             <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
               <div className="h-full bg-emerald-500" style={{ width: `${((voltage - 210) / 40) * 100}%` }}></div>
             </div>
-          </div>
+          </Card>
 
           {/* Card 2: Current */}
-          <div className="glass-card rounded-2xl p-4.5 flex flex-col justify-between h-[135px]">
-            <span className="text-[9px] font-black uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
-              <Activity className="w-3.5 h-3.5 text-stone-550" />
+          <Card className="flex flex-col justify-between h-[135px]" hover={false}>
+            <span className="text-[9px] font-black uppercase tracking-wider text-theme-muted flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5 text-theme-muted" />
               Load Current
             </span>
             <div className="my-2">
-              <div className="text-3xl font-black text-emerald-455 font-sans">{current.toFixed(2)} <span className="text-xs text-stone-550">A</span></div>
-              <span className="text-[8px] text-stone-605 font-bold block mt-1 uppercase">Instantaneous RMS Current</span>
+              <div className="text-3xl font-black text-theme-brand font-display">{current.toFixed(2)} <span className="text-xs text-theme-muted">A</span></div>
+              <span className="text-[8px] text-theme-muted font-bold block mt-1 uppercase">Instantaneous RMS Current</span>
             </div>
             <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
               <div className="h-full bg-emerald-500" style={{ width: `${(current / 10.0) * 100}%` }}></div>
             </div>
-          </div>
+          </Card>
 
           {/* Card 3: Real-Time Power */}
-          <div className="glass-card rounded-2xl p-4.5 flex flex-col justify-between h-[135px]">
-            <span className="text-[9px] font-black uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5 text-stone-550" />
+          <Card className="flex flex-col justify-between h-[135px]" hover={false}>
+            <span className="text-[9px] font-black uppercase tracking-wider text-theme-muted flex items-center gap-1.5">
+              <Zap className="w-3.5 h-3.5 text-theme-muted" />
               Active Power
             </span>
             <div className="my-2">
-              <div className="text-3xl font-black text-white font-sans">{power} <span className="text-xs text-stone-550">W</span></div>
-              <span className="text-[8px] text-stone-605 font-bold block mt-1 uppercase">Real-time load rate</span>
+              <div className="text-3xl font-black text-theme-primary font-display">{power} <span className="text-xs text-theme-muted">W</span></div>
+              <span className="text-[8px] text-theme-muted font-bold block mt-1 uppercase">Real-time load rate</span>
             </div>
             <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
               <div className="h-full bg-emerald-500" style={{ width: `${(power / 2500.0) * 100}%` }}></div>
             </div>
-          </div>
+          </Card>
 
           {/* Card 4: Energy Consumption */}
-          <div className="glass-card rounded-2xl p-4.5 flex flex-col justify-between h-[135px] sm:col-span-2 md:col-span-1">
-            <span className="text-[9px] font-black uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
-              <BarChart3 className="w-3.5 h-3.5 text-stone-550" />
+          <Card className="flex flex-col justify-between h-[135px]" hover={false}>
+            <span className="text-[9px] font-black uppercase tracking-wider text-theme-muted flex items-center gap-1.5">
+              <BarChart3 className="w-3.5 h-3.5 text-theme-muted" />
               Energy Consumed
             </span>
             <div className="my-2">
-              <div className="text-3xl font-black text-white font-sans">{cumulativeEnergy.toFixed(4)} <span className="text-xs text-stone-550">kWh</span></div>
-              <span className="text-[8px] text-stone-605 font-bold block mt-1 uppercase">Cumulative since boot</span>
+              <div className="text-3xl font-black text-theme-primary font-display">{cumulativeEnergy.toFixed(4)} <span className="text-xs text-theme-muted">kWh</span></div>
+              <span className="text-[8px] text-theme-muted font-bold block mt-1 uppercase">Cumulative since boot</span>
             </div>
             <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
               <div className="h-full bg-emerald-500" style={{ width: "65%" }}></div>
             </div>
-          </div>
+          </Card>
 
           {/* Card 5: Estimated CO2 */}
-          <div className="glass-card rounded-2xl p-4.5 flex flex-col justify-between h-[135px] sm:col-span-2 md:col-span-2">
-            <span className="text-[9px] font-black uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
-              <TrendingUp className="w-3.5 h-3.5 text-stone-550" />
+          <Card className="flex flex-col justify-between h-[135px] sm:col-span-2" hover={false}>
+            <span className="text-[9px] font-black uppercase tracking-wider text-theme-muted flex items-center gap-1.5">
+              <TrendingUp className="w-3.5 h-3.5 text-theme-muted" />
               Estimated Carbon Output
             </span>
             <div className="my-2">
-              <div className="text-3xl font-black text-amber-500 font-sans">{estimatedCo2.toFixed(3)} <span className="text-xs text-stone-550">kg CO₂e</span></div>
-              <span className="text-[8px] text-stone-605 font-bold block mt-1 uppercase">Grid emission multiplier applied</span>
+              <div className="text-3xl font-black text-amber-500 font-display">{estimatedCo2.toFixed(3)} <span className="text-xs text-theme-muted">kg CO₂e</span></div>
+              <span className="text-[8px] text-theme-muted font-bold block mt-1 uppercase">Grid emission multiplier applied</span>
             </div>
             <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
               <div className="h-full bg-amber-500" style={{ width: "45%" }}></div>
             </div>
-          </div>
+          </Card>
         </div>
       </div>
 
       {/* Analytics Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Chart 1: Category Bar Chart */}
-        <div className="glass-card rounded-3xl p-5 flex flex-col justify-between h-[300px]">
+        {/* Chart 1: Category Bar */}
+        <Card hover={false} className="flex flex-col justify-between h-[300px]">
           <div className="flex items-center space-x-2.5 pb-3 border-b border-white/5 mb-4">
             <div className="w-6 h-6 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
               <BarChart3 className="w-3.5 h-3.5 text-emerald-450" />
             </div>
-            <h3 className="font-extrabold text-xs text-stone-300 uppercase tracking-widest">
+            <h3 className="font-extrabold text-xs text-theme-secondary uppercase tracking-widest">
               Consumption by Appliance
             </h3>
           </div>
@@ -276,8 +268,8 @@ export default function IoTDashboard() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={deviceBreakdownData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.03)" />
-                <XAxis dataKey="name" stroke="#44403c" fontSize={10} tickLine={false} style={{ fontWeight: "bold" }} />
-                <YAxis stroke="#44403c" fontSize={10} tickLine={false} style={{ fontWeight: "bold" }} />
+                <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={10} tickLine={false} style={{ fontWeight: "bold" }} />
+                <YAxis stroke="var(--text-muted)" fontSize={10} tickLine={false} style={{ fontWeight: "bold" }} />
                 <ChartTooltip content={<CustomChartTooltip />} />
                 <Bar dataKey="usage" radius={[6, 6, 0, 0]}>
                   {deviceBreakdownData.map((entry, index) => (
@@ -287,15 +279,15 @@ export default function IoTDashboard() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </Card>
 
-        {/* Chart 2: Hourly Line Area Chart */}
-        <div className="glass-card rounded-3xl p-5 flex flex-col justify-between h-[300px]">
+        {/* Chart 2: Hourly Area */}
+        <Card hover={false} className="flex flex-col justify-between h-[300px]">
           <div className="flex items-center space-x-2.5 pb-3 border-b border-white/5 mb-4">
             <div className="w-6 h-6 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
               <TrendingUp className="w-3.5 h-3.5 text-emerald-450" />
             </div>
-            <h3 className="font-extrabold text-xs text-stone-300 uppercase tracking-widest">
+            <h3 className="font-extrabold text-xs text-theme-secondary uppercase tracking-widest">
               Live Hourly Load Trends
             </h3>
           </div>
@@ -304,20 +296,20 @@ export default function IoTDashboard() {
               <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                 <defs>
                   <linearGradient id="loadGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                    <stop offset="5%" stopColor="var(--brand-primary)" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="var(--brand-primary)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.03)" />
-                <XAxis dataKey="hour" stroke="#44403c" fontSize={10} tickLine={false} style={{ fontWeight: "bold" }} />
-                <YAxis stroke="#44403c" fontSize={10} tickLine={false} style={{ fontWeight: "bold" }} />
+                <XAxis dataKey="hour" stroke="var(--text-muted)" fontSize={10} tickLine={false} style={{ fontWeight: "bold" }} />
+                <YAxis stroke="var(--text-muted)" fontSize={10} tickLine={false} style={{ fontWeight: "bold" }} />
                 <ChartTooltip content={<CustomChartTooltip />} />
-                <Area type="monotone" name="Power Load" dataKey="load" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#loadGrad)" />
+                <Area type="monotone" name="Power Load" dataKey="load" stroke="var(--brand-primary)" strokeWidth={2} fillOpacity={1} fill="url(#loadGrad)" />
                 <Area type="monotone" name="Solar Gen" dataKey="gen" stroke="#eab308" strokeWidth={1.5} fill="none" strokeDasharray="4 4" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </Card>
       </div>
     </div>
   );

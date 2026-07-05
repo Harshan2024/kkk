@@ -1,7 +1,76 @@
-node_modules
-.next
-dist
-build
+# ─────────────────────────────────────────────────────────────────────────────
+# CarbonTracker AI — .gitignore
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
 .env
-.env.local
-coverage
+.env.*
+!.env.development
+!.env.staging
+!.env.production
+
+# ── FastAPI / Uvicorn ─────────────────────────────────────────────────────────
+*.log
+*.sqlite3
+*.db
+
+# ── Next.js ───────────────────────────────────────────────────────────────────
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+.dockerignore
+
+# ── SSL Certificates (never commit) ──────────────────────────────────────────
+nginx/ssl/
+
+# ── Backups ───────────────────────────────────────────────────────────────────
+backups/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log.gz
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+backend/test-results/
+backend/.pytest_cache/
+backend/htmlcov/
+backend/.coverage
+backend/coverage.xml
+results/
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Static uploads ────────────────────────────────────────────────────────────
+backend/app/static/avatars/*
+!backend/app/static/avatars/.gitkeep
+
+# ── spaCy models ──────────────────────────────────────────────────────────────
+backend/app/ai/models/

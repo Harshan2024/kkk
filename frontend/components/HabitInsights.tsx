@@ -17,7 +17,7 @@ export const HabitInsights = React.memo(function HabitInsights() {
     let active = true;
     async function fetchAnalysis() {
       try {
-        const response = await api.getHabitAnalysis("demo_user");
+        const response = await api.getHabitAnalysis();
         if (active) {
           if (response && response.success) {
             setAnalysisData(response.data);

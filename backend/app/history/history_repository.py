@@ -41,8 +41,11 @@ class HistoryRepository:
             # PostgreSQL mode
             from app.models.history import History
             from app.models.models import Activity
+            from sqlalchemy.orm import joinedload
             # Query History filtered by user_id if provided
-            query = active_db.query(History)
+            query = active_db.query(History).options(
+                joinedload(History.activity).joinedload(Activity.entities)
+            )
             if user_id is not None:
                 query = query.filter(History.user_id == user_id)
             history_entries = query.order_by(History.created_at.desc()).all()

@@ -7,7 +7,8 @@ DEFAULT_FLAGS = {
     "enable_multimodal": True,
     "enable_forecasting": True,
     "enable_semantic_search": True,
-    "FORECAST_ENABLED": False
+    "FORECAST_ENABLED": False,
+    "enable_smart_devices": False
 }
 
 def get_feature_flags() -> Dict[str, bool]:

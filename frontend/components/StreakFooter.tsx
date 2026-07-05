@@ -4,6 +4,7 @@ import React from "react";
 import { Rocket, Lock, Shield, Check } from "lucide-react";
 import { motion } from "framer-motion";
 import { useAIStore } from "../stores/aiStore";
+import { Card } from "./ui/Card";
 
 interface StreakFooterProps {
   streak?: number;
@@ -19,7 +20,7 @@ export default function StreakFooter({ streak = 1 }: StreakFooterProps) {
   const days = [1, 2, 3, 4, 5, 6, 7];
 
   return (
-    <div className="glass-card rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 select-none relative overflow-hidden">
+    <Card className="flex flex-col md:flex-row items-center justify-between gap-4 select-none relative overflow-hidden" hover={false}>
       {/* Background horizontal accent glow */}
       <div className="absolute left-0 bottom-0 w-full h-[2px] bg-gradient-to-r from-emerald-500/0 via-emerald-500/30 to-emerald-500/0 pointer-events-none"></div>
 
@@ -29,14 +30,14 @@ export default function StreakFooter({ streak = 1 }: StreakFooterProps) {
           <Rocket className="w-4.5 h-4.5 text-emerald-400 rotate-45" />
         </div>
         <div>
-          <h4 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+          <h4 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-1.5 font-sans">
             Keep going! You're on a {currentStreak} day streak.
           </h4>
-          <p className="text-[10px] text-stone-500 font-bold mt-0.5">
+          <p className="text-[10px] text-theme-muted font-bold mt-0.5 font-sans">
             {longestStreak > currentStreak && `Personal Best: ${longestStreak} days. `}
             {carbonStreak > 0 && `Carbon Streak: ${carbonStreak}d. `}
             {scoreStreak > 0 && `High Score Streak: ${scoreStreak}d. `}
-            Build a 7 day streak to unlock the <span className="text-emerald-450 font-extrabold">"Green Warrior"</span> badge!
+            Build a 7 day streak to unlock the <span className="text-theme-brand font-extrabold">&ldquo;Green Warrior&rdquo;</span> badge!
           </p>
         </div>
       </div>
@@ -57,18 +58,18 @@ export default function StreakFooter({ streak = 1 }: StreakFooterProps) {
                   isActive 
                     ? "bg-emerald-500 border-emerald-400 text-[#080d0a] shadow-lg shadow-emerald-500/30"
                     : isCompleted
-                    ? "bg-emerald-950/20 border-emerald-500/20 text-emerald-450"
-                    : "bg-white/[0.01] border-white/5 text-stone-500"
+                    ? "bg-emerald-950/20 border-emerald-500/20 text-theme-brand"
+                    : "bg-white/[0.01] border-white/5 text-theme-muted"
                 }`}
               >
                 {isCompleted ? (
                   <Check className="w-3.5 h-3.5 stroke-[2.5px]" />
                 ) : isLast ? (
-                  <Shield className={`w-3.5 h-3.5 ${isActive ? "text-[#080d0a]" : "text-stone-500"}`} />
+                  <Shield className={`w-3.5 h-3.5 ${isActive ? "text-[#080d0a]" : "text-theme-muted"}`} />
                 ) : !isActive ? (
                   <div className="relative">
                     <span className="opacity-0">{day}</span>
-                    <Lock className="w-2.5 h-2.5 text-stone-605 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                    <Lock className="w-2.5 h-2.5 text-theme-muted absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
                   </div>
                 ) : (
                   day
@@ -89,6 +90,6 @@ export default function StreakFooter({ streak = 1 }: StreakFooterProps) {
           );
         })}
       </div>
-    </div>
+    </Card>
   );
 }

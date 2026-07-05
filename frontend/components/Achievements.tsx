@@ -4,20 +4,21 @@ import React from "react";
 import { Trophy, Lock, Award, ShieldCheck, Flame } from "lucide-react";
 import { Achievement } from "../services/api";
 import { motion } from "framer-motion";
+import { Card } from "./ui/Card";
+import { Badge } from "./ui/Badge";
 
 interface AchievementsProps {
   unlockedList: Achievement[];
   loading: boolean;
 }
 
-// Master list of all possible achievements to render locked/unlocked states
 const SYSTEM_ACHIEVEMENTS = [
   {
     name: "Eco Pioneer",
     description: "Logged your first carbon activity!",
     badge_type: "bronze",
     icon: Flame,
-    color: "from-orange-500/25 to-amber-600/10 border-orange-500/30 text-orange-500"
+    color: "from-orange-500/25 to-amber-600/10 border-orange-500/30 text-orange-400"
   },
   {
     name: "Green Commuter",
@@ -45,7 +46,7 @@ const SYSTEM_ACHIEVEMENTS = [
     description: "Logged 5 or more activities in CarbonTracker.",
     badge_type: "gold",
     icon: Trophy,
-    color: "from-yellow-400/30 to-amber-500/20 border-yellow-500/50 text-yellow-500 shadow-yellow-500/10"
+    color: "from-yellow-400/30 to-amber-500/20 border-yellow-500/50 text-yellow-400 shadow-yellow-500/10"
   }
 ];
 
@@ -64,10 +65,10 @@ export default function Achievements({ unlockedList, loading }: AchievementsProp
   };
 
   return (
-    <div className="glass-card rounded-3xl p-6 sm:p-8 transition-all duration-300">
-      <div className="flex items-center space-x-2.5 mb-6 border-b border-white/10 dark:border-white/5 pb-3">
+    <Card className="p-6 sm:p-8" hover={false}>
+      <div className="flex items-center space-x-2.5 mb-6 border-b border-white/5 pb-3">
         <Trophy className="w-5 h-5 text-yellow-500 animate-bounce" />
-        <h3 className="font-bold text-lg text-earth-800 dark:text-forest-100">
+        <h3 className="font-bold text-lg text-theme-primary">
           Climate Achievements
         </h3>
       </div>
@@ -93,13 +94,12 @@ export default function Achievements({ unlockedList, loading }: AchievementsProp
                 className={`relative flex flex-col justify-between p-4 rounded-2xl border transition-all duration-300 ${
                   unlocked
                     ? `bg-gradient-to-br ${sys.color} shadow-lg shadow-black/10`
-                    : "bg-stone-950/20 dark:bg-black/20 border-white/5 text-stone-600 dark:text-stone-750 opacity-40 grayscale"
+                    : "bg-stone-950/20 border-white/5 text-theme-muted opacity-40 grayscale"
                 }`}
               >
-                {/* Lock icon for locked achievements */}
                 {!unlocked && (
                   <div className="absolute top-2.5 right-2.5">
-                    <Lock className="w-3.5 h-3.5 text-stone-500 dark:text-stone-700" />
+                    <Lock className="w-3.5 h-3.5 text-theme-muted" />
                   </div>
                 )}
 
@@ -110,21 +110,21 @@ export default function Achievements({ unlockedList, loading }: AchievementsProp
                     <Icon className="w-5 h-5" />
                   </div>
                   <h4 className={`text-xs font-extrabold uppercase tracking-wide ${
-                    unlocked ? "text-earth-900 dark:text-white" : "text-stone-500 dark:text-stone-600"
+                    unlocked ? "text-theme-primary" : "text-theme-muted"
                   }`}>
                     {sys.name}
                   </h4>
-                  <p className="text-[10px] leading-tight text-earth-700 dark:text-stone-400 mt-1">
+                  <p className="text-[10px] leading-tight text-theme-secondary mt-1">
                     {sys.description}
                   </p>
                 </div>
 
-                <div className="mt-3 border-t border-white/10 dark:border-white/5 pt-2 flex items-center justify-between text-[9px] font-bold tracking-wider">
+                <div className="mt-3 border-t border-white/5 pt-2 flex items-center justify-between text-[9px] font-bold tracking-wider text-theme-muted">
                   <span className="uppercase">{sys.badge_type}</span>
                   {unlocked && date ? (
-                    <span className="text-stone-500 dark:text-stone-400">UNLOCKED {date}</span>
+                    <span className="text-theme-brand">UNLOCKED {date}</span>
                   ) : (
-                    <span className="text-stone-605 dark:text-stone-705">LOCKED</span>
+                    <span>LOCKED</span>
                   )}
                 </div>
               </motion.div>
@@ -132,6 +132,6 @@ export default function Achievements({ unlockedList, loading }: AchievementsProp
           })}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

@@ -24,7 +24,13 @@ class GamificationService:
         self.repository = repository or GamificationRepository()
 
     def get_profile(self, username: str = "demo_user", db: Optional[Session] = None) -> GamificationProfile:
-        records = self.history_service.get_all(db=db)
+        user_id = None
+        if db is not None:
+            from app.models.models import User
+            user = db.query(User).filter(User.username == username).first()
+            if user:
+                user_id = user.id
+        records = self.history_service.get_all(db=db, user_id=user_id)
         
         # 1. Calculate base components
         streak = self.calculate_streak(records)
@@ -63,7 +69,13 @@ class GamificationService:
         )
 
     def get_achievements(self, username: str = "demo_user", db: Optional[Session] = None) -> List[AchievementStatus]:
-        records = self.history_service.get_all(db=db)
+        user_id = None
+        if db is not None:
+            from app.models.models import User
+            user = db.query(User).filter(User.username == username).first()
+            if user:
+                user_id = user.id
+        records = self.history_service.get_all(db=db, user_id=user_id)
         streak = self.calculate_streak(records)
         total_xp_pre_level5 = self.calculate_total_xp(records, streak, username, exclude_level5=True, db=db)
         level_pre_level5 = (total_xp_pre_level5 // 300) + 1
@@ -154,8 +166,15 @@ class GamificationService:
             )
         return results
 
-    def get_challenges(self, username: str = "demo_user", db: Optional[Session] = None) -> Dict[str, List[ChallengeProgress]]:
-        records = self.history_service.get_all(db=db)
+    def get_challenges(self, username: str = "demo_user", db: Optional[Session] = None, records: Optional[List[Dict[str, Any]]] = None) -> Dict[str, List[ChallengeProgress]]:
+        if records is None:
+            user_id = None
+            if db is not None:
+                from app.models.models import User
+                user = db.query(User).filter(User.username == username).first()
+                if user:
+                    user_id = user.id
+            records = self.history_service.get_all(db=db, user_id=user_id)
         today_str = datetime.utcnow().strftime("%Y-%m-%d")
         week_ago = datetime.utcnow().date() - timedelta(days=7)
         
@@ -460,7 +479,7 @@ class GamificationService:
                 xp += 500 # level_5
                 
         # 4. XP from Dynamic Challenge Completions
-        challenges = self.get_challenges(username, db=db)
+        challenges = self.get_challenges(username, db=db, records=records)
         for dc in challenges["daily"]:
             if dc.completed:
                 xp += dc.xp

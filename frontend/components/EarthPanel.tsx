@@ -3,6 +3,9 @@
 import React from "react";
 import { Globe, Leaf } from "lucide-react";
 import { motion } from "framer-motion";
+import { Card } from "./ui/Card";
+import { Badge } from "./ui/Badge";
+import Image from "next/image";
 
 interface EarthPanelProps {
   score: number;
@@ -13,7 +16,7 @@ export default function EarthPanel({ score = 93 }: EarthPanelProps) {
   const userPercentile = Math.min(99, Math.max(20, Math.round(score * 0.8 + 10)));
 
   return (
-    <div className="glass-card rounded-3xl p-6 h-full flex flex-col justify-between items-center relative overflow-hidden select-none min-h-[420px]">
+    <Card className="flex flex-col justify-between items-center relative overflow-hidden select-none min-h-[420px] h-full" hover={false}>
       {/* Background radial glows */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 rounded-full bg-emerald-500/10 blur-[80px] pointer-events-none z-0"></div>
       
@@ -22,7 +25,7 @@ export default function EarthPanel({ score = 93 }: EarthPanelProps) {
         <div className="w-6 h-6 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
           <Globe className="w-3.5 h-3.5 text-emerald-400" />
         </div>
-        <h3 className="font-extrabold text-xs text-stone-300 uppercase tracking-widest">
+        <h3 className="font-extrabold text-xs text-theme-secondary uppercase tracking-widest">
           Carbon Earth Status
         </h3>
       </div>
@@ -47,7 +50,7 @@ export default function EarthPanel({ score = 93 }: EarthPanelProps) {
           <div className="w-2.5 h-2.5 rounded-full bg-emerald-400/80 shadow-lg shadow-emerald-400 absolute top-0 left-1/2 -translate-x-1/2"></div>
         </motion.div>
 
-        {/* The Earth Image with floating and scaling animations */}
+        {/* The Earth Image */}
         <motion.div
           animate={{ 
             y: [-6, 6, -6],
@@ -59,38 +62,37 @@ export default function EarthPanel({ score = 93 }: EarthPanelProps) {
           }}
           className="w-44 h-44 drop-shadow-[0_0_35px_rgba(16,185,129,0.25)] relative"
         >
-          <img 
+          <Image 
             src="/earth_glowing.png" 
             alt="Glowing Earth" 
+            width={176}
+            height={176}
             className="w-full h-full object-contain"
+            priority
           />
         </motion.div>
       </div>
 
       {/* Bottom details & Badge */}
       <div className="w-full flex flex-col items-center text-center space-y-3.5 relative z-10">
-        {/* Eco-Champion Badge */}
-        <motion.div 
-          whileHover={{ scale: 1.05 }}
-          className="flex items-center space-x-1.5 px-4 py-1.5 rounded-full bg-emerald-950/40 border border-emerald-500/25 shadow-lg shadow-emerald-950/50 cursor-pointer"
-        >
-          <Leaf className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400/20" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
+        <Badge variant="success" size="md" dot>
+          <span className="flex items-center gap-1.5">
+            <Leaf className="w-3.5 h-3.5" />
             Eco-Champion
           </span>
-        </motion.div>
+        </Badge>
 
         <div>
-          <p className="text-[11px] font-bold text-stone-400 leading-normal max-w-[210px]">
+          <p className="text-[11px] font-bold text-theme-secondary leading-normal max-w-[210px] font-sans">
             You are doing better than{" "}
-            <span className="text-emerald-400 font-extrabold text-xs">{userPercentile}%</span> of
+            <span className="text-theme-brand font-extrabold text-xs">{userPercentile}%</span> of
             users today!
           </p>
-          <span className="text-[9px] text-stone-500 font-bold block mt-1 uppercase tracking-wider">
-            "Small choices today, a better planet tomorrow."
+          <span className="text-[9px] text-theme-muted font-bold block mt-1 uppercase tracking-wider font-sans">
+            &ldquo;Small choices today, a better planet tomorrow.&rdquo;
           </span>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }

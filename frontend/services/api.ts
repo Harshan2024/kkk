@@ -12,6 +12,13 @@
 
 import logger from "../utils/logger";
 import {
+  getAuthorizationHeader,
+  saveToken,
+  saveRefreshToken,
+  loadRefreshToken,
+} from "./authService";
+import { cache, CACHE_KEYS, CACHE_TTL } from "./cache";
+import {
   sanitizeSummary,
   sanitizeInsights,
   sanitizeActivities,
@@ -24,6 +31,82 @@ const HOST = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 const BASE_URL = HOST.endsWith("/api/v1") ? HOST : `${HOST}/api/v1`;
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOKEN REFRESH — queue-guarded, singleton in-flight
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** True while a refresh call is in-flight. Prevents storm of concurrent refreshes. */
+let _isRefreshing = false;
+/** Callbacks waiting on the in-flight refresh to resolve. */
+let _refreshQueue: Array<(token: string | null) => void> = [];
+
+/**
+ * refreshAccessToken — exchanges the stored refresh token for a new access+refresh pair.
+ *
+ * Queue pattern:
+ *  - First caller fires the real POST /auth/refresh request.
+ *  - All subsequent 401s that arrive while refresh is in-flight queue up.
+ *  - When refresh resolves, ALL queued callers get the new token simultaneously.
+ *  - If refresh fails (expired / revoked), all queued callers receive null →
+ *    the global "ct:force-logout" event is dispatched so aiStore can clear state.
+ *
+ * Returns the new access token on success, null on failure.
+ */
+async function refreshAccessToken(): Promise<string | null> {
+  if (_isRefreshing) {
+    // Another refresh is already running — queue this caller
+    return new Promise((resolve) => {
+      _refreshQueue.push(resolve);
+    });
+  }
+
+  const refreshToken = loadRefreshToken();
+  if (!refreshToken) {
+    logger.warn("ApiService", "refreshAccessToken: no refresh token in storage → force logout");
+    window.dispatchEvent(new CustomEvent("ct:force-logout"));
+    return null;
+  }
+
+  _isRefreshing = true;
+  try {
+    const response = await fetch(`${HOST}/api/v1/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!response.ok) {
+      logger.warn("ApiService", `refreshAccessToken: backend returned ${response.status} → force logout`);
+      _refreshQueue.forEach((cb) => cb(null));
+      _refreshQueue = [];
+      window.dispatchEvent(new CustomEvent("ct:force-logout"));
+      return null;
+    }
+
+    const data = await response.json();
+    const newAccessToken: string = data.access_token;
+    const newRefreshToken: string | undefined = data.refresh_token;
+
+    saveToken(newAccessToken);
+    if (newRefreshToken) saveRefreshToken(newRefreshToken);
+
+    logger.info("ApiService", "refreshAccessToken: token pair rotated successfully");
+    _refreshQueue.forEach((cb) => cb(newAccessToken));
+    _refreshQueue = [];
+    return newAccessToken;
+  } catch (err) {
+    logger.error("ApiService", "refreshAccessToken: network error during refresh", { error: err });
+    _refreshQueue.forEach((cb) => cb(null));
+    _refreshQueue = [];
+    window.dispatchEvent(new CustomEvent("ct:force-logout"));
+    return null;
+  } finally {
+    _isRefreshing = false;
+  }
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPE DEFINITIONS
@@ -234,6 +317,19 @@ export interface SystemHealth {
   cache: string;
   iot: string;
   failed?: boolean;
+}
+
+/**
+ * ApiError — typed HTTP error that carries the numeric HTTP status.
+ * Use this instead of parsing error message strings to detect 401/403/404/500.
+ */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
 }
 
 export interface HistoryItem {
@@ -451,6 +547,13 @@ async function fetchWithTimeout(
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (options.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      options.signal.addEventListener("abort", () => controller.abort());
+    }
+  }
   const startTime = performance.now();
 
   const isHealthCheck = url.endsWith("/health") || url.endsWith("/api/system/status");
@@ -702,14 +805,19 @@ class ApiService {
     if (options.body && !headers.has("Content-Type") && !(options.body instanceof FormData)) {
       headers.set("Content-Type", "application/json");
     }
-    const token = typeof window !== "undefined" ? localStorage.getItem("carbontracker_token") : null;
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
+    const authHeader = getAuthorizationHeader();
+    if (authHeader) {
+      headers.set("Authorization", authHeader);
     }
 
-    const doFetch = async (): Promise<T> => {
+    const doFetch = async (isRetryAfterRefresh = false): Promise<T> => {
       let response: Response;
       try {
+        // Always read the current token so post-refresh retries use the new one
+        const currentAuthHeader = getAuthorizationHeader();
+        if (currentAuthHeader) {
+          headers.set("Authorization", currentAuthHeader);
+        }
         response = await fetchWithTimeout(url, { ...options, headers }, timeoutMs);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Network error";
@@ -717,15 +825,28 @@ class ApiService {
       }
 
       if (!response.ok) {
+        // ── Auto token refresh on 401 ────────────────────────────────────────
+        // Only attempt refresh once (isRetryAfterRefresh guard prevents loops)
+        if (response.status === 401 && !isRetryAfterRefresh) {
+          const newToken = await refreshAccessToken();
+          if (newToken) {
+            logger.info("ApiService", `Auto-refreshed token, retrying: ${endpoint}`);
+            return doFetch(true); // retry with new token, no further refresh
+          }
+          // Refresh failed → force logout was already dispatched
+          throw new ApiError(401, "Session expired. Please log in again.");
+        }
+        // ── Other HTTP errors ────────────────────────────────────────────────
         const errorText = await response.text().catch(() => "");
-        let errorDetail = `HTTP ${response.status}`;
+        let errorDetail = "";
         try {
           const errJson = JSON.parse(errorText);
-          errorDetail = errJson.detail || errJson.error || errorDetail;
+          errorDetail = errJson.detail || errJson.error || "";
         } catch {
-          errorDetail = errorText || errorDetail;
+          errorDetail = errorText || "";
         }
-        throw new Error(errorDetail);
+        const finalMsg = errorDetail ? `HTTP ${response.status}: ${errorDetail}` : `HTTP ${response.status}`;
+        throw new ApiError(response.status, finalMsg);
       }
 
       let result: unknown;
@@ -749,6 +870,7 @@ class ApiService {
       return result as T;
     };
 
+
     // Only retry safe idempotent GET requests
     const method = (options.method || "GET").toUpperCase();
     const shouldRetry = method === "GET" && retries > 0;
@@ -765,16 +887,21 @@ class ApiService {
     );
   }
 
-  async logActivity(text: string, username = "demo_user", region = "Global"): Promise<Activity> {
-    return this.request<Activity>("/activities", {
+  async logActivity(text: string, region = "Global"): Promise<Activity> {
+    const res = await this.request<Activity>("/activities", {
       method: "POST",
-      body: JSON.stringify({ text, username, region }),
+      body: JSON.stringify({ text, region }),
     });
+    // Invalidate dashboard summary and analytics cache on activity change
+    cache.invalidate(CACHE_KEYS.DASHBOARD_SUMMARY);
+    cache.invalidate(CACHE_KEYS.ANALYTICS);
+    return res;
   }
 
-  async getActivities(username = "demo_user", limit = 20, offset = 0): Promise<Activity[]> {
+  async getActivities(limit = 20, offset = 0, signal?: AbortSignal): Promise<Activity[]> {
     const raw = await this.request<unknown>(
-      `/activities?username=${username}&limit=${limit}&offset=${offset}`
+      `/activities?limit=${limit}&offset=${offset}`,
+      { signal }
     );
     return sanitizeActivities(raw);
   }
@@ -783,19 +910,47 @@ class ApiService {
   // DASHBOARD ENDPOINTS
   // ─────────────────────────────────────────────────────────────────────────
 
-  async getDashboardSummary(username = "demo_user"): Promise<DashboardSummary> {
-    const raw = await this.request<unknown>(`/dashboard/summary?username=${username}`);
-    return sanitizeSummary(raw);
+  async getDashboardSummary(signal?: AbortSignal): Promise<DashboardSummary> {
+    const cached = cache.get<DashboardSummary>(CACHE_KEYS.DASHBOARD_SUMMARY);
+    if (cached) return cached;
+
+    const raw = await this.request<any>(`/dashboard/summary`, { signal });
+    let summaryData: DashboardSummary;
+    if (raw && typeof raw === "object") {
+      if (raw.success === false) {
+        throw new Error(raw.error || "Failed to retrieve dashboard summary");
+      }
+      if ("summary" in raw) {
+        summaryData = sanitizeSummary(raw.summary);
+      } else {
+        summaryData = sanitizeSummary(raw);
+      }
+    } else {
+      summaryData = sanitizeSummary(raw);
+    }
+
+    cache.set(CACHE_KEYS.DASHBOARD_SUMMARY, summaryData, CACHE_TTL.DASHBOARD_SUMMARY);
+    return summaryData;
   }
 
-  async getInsights(username = "demo_user"): Promise<AIInsight[]> {
-    const raw = await this.request<unknown>(`/insights?username=${username}`);
-    return sanitizeInsights(raw);
+  async getInsights(signal?: AbortSignal): Promise<AIInsight[]> {
+    const cached = cache.get<AIInsight[]>(CACHE_KEYS.INSIGHTS);
+    if (cached) return cached;
+
+    const raw = await this.request<unknown>(`/insights`, { signal });
+    const data = sanitizeInsights(raw);
+    cache.set(CACHE_KEYS.INSIGHTS, data, CACHE_TTL.INSIGHTS);
+    return data;
   }
 
-  async getAchievements(username = "demo_user"): Promise<Achievement[]> {
-    const raw = await this.request<unknown>(`/achievements?username=${username}`);
-    return sanitizeAchievements(raw);
+  async getAchievements(signal?: AbortSignal): Promise<Achievement[]> {
+    const cached = cache.get<Achievement[]>(CACHE_KEYS.ACHIEVEMENTS);
+    if (cached) return cached;
+
+    const raw = await this.request<unknown>(`/achievements`, { signal });
+    const data = sanitizeAchievements(raw);
+    cache.set(CACHE_KEYS.ACHIEVEMENTS, data, CACHE_TTL.ACHIEVEMENTS);
+    return data;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -804,18 +959,17 @@ class ApiService {
 
   async postChat(
     message: string,
-    username = "demo_user",
     timeoutMs = 30_000
   ): Promise<{ response: string }> {
     return this.request<{ response: string }>(
       "/chat",
-      { method: "POST", body: JSON.stringify({ message, username }) },
+      { method: "POST", body: JSON.stringify({ message }) },
       timeoutMs
     );
   }
 
-  async getChatHistory(username = "demo_user"): Promise<ChatMessage[]> {
-    const raw = await this.request<unknown>(`/chat/history?username=${username}`);
+  async getChatHistory(): Promise<ChatMessage[]> {
+    const raw = await this.request<unknown>(`/chat/history`);
     return sanitizeChatMessages(raw);
   }
 
@@ -824,13 +978,12 @@ class ApiService {
   // ─────────────────────────────────────────────────────────────────────────
 
   async getForecast(
-    username = "demo_user",
     steps = 30,
     model = "prophet",
     generate = false
   ): Promise<{ status?: string; message?: string; data: ForecastData[] }> {
     const raw = await this.request<any>(
-      `/analytics/forecast?username=${username}&steps=${steps}&model=${model}&generate=${generate}`
+      `/analytics/forecast?steps=${steps}&model=${model}&generate=${generate}`
     );
     if (raw && typeof raw === "object" && raw.status === "pending") {
       return { status: "pending", message: raw.message, data: [] };
@@ -838,18 +991,23 @@ class ApiService {
     return { data: sanitizeForecast(raw) };
   }
 
-  async getObservabilityMetrics(username = "demo_user"): Promise<ObservabilityMetrics> {
-    return this.request<ObservabilityMetrics>(`/observability/metrics?username=${username}`);
+  async getObservabilityMetrics(): Promise<ObservabilityMetrics> {
+    return this.request<ObservabilityMetrics>(`/observability/metrics`);
   }
 
-  async getHabitAnalysis(username = "demo_user"): Promise<any> {
-    return this.request<any>(`/habit-analysis?username=${username}`);
+  async getHabitAnalysis(): Promise<any> {
+    return this.request<any>(`/habit-analysis`);
   }
 
-  async getAnalytics(username = "demo_user"): Promise<AnalyticsPayload> {
+  async getAnalytics(): Promise<AnalyticsPayload> {
+    const cached = cache.get<AnalyticsPayload>(CACHE_KEYS.ANALYTICS);
+    if (cached) return cached;
+
     try {
-      const data = await this.request<any>(`/analytics?username=${username}`);
-      return normalizeAnalytics(data);
+      const data = await this.request<any>(`/analytics`);
+      const normalized = normalizeAnalytics(data);
+      cache.set(CACHE_KEYS.ANALYTICS, normalized, CACHE_TTL.ANALYTICS);
+      return normalized;
     } catch (err) {
       logger.warn("ApiService", "getAnalytics failed, returning DEFAULT_ANALYTICS", err);
       return DEFAULT_ANALYTICS;
@@ -859,12 +1017,11 @@ class ApiService {
   async correctActivity(
     original_text: string,
     corrected_text: string,
-    category = "nlp_parse",
-    username = "demo_user"
+    category = "nlp_parse"
   ): Promise<unknown> {
     return this.request<unknown>("/activities/correct", {
       method: "POST",
-      body: JSON.stringify({ original_text, corrected_text, category, username }),
+      body: JSON.stringify({ original_text, corrected_text, category }),
     });
   }
 
@@ -874,19 +1031,18 @@ class ApiService {
 
   async uploadMultimodal(
     file: File,
-    username = "demo_user",
     region = "Global"
   ): Promise<unknown> {
     const formData = new FormData();
     formData.append("file", file);
 
     const headers = new Headers();
-    const token = typeof window !== "undefined" ? localStorage.getItem("carbontracker_token") : null;
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
+    const authHeader = getAuthorizationHeader();
+    if (authHeader) {
+      headers.set("Authorization", authHeader);
     }
 
-    const url = `${BASE_URL}/activities/upload-multimodal?username=${encodeURIComponent(username)}&region=${encodeURIComponent(region)}`;
+    const url = `${BASE_URL}/activities/upload-multimodal?region=${encodeURIComponent(region)}`;
 
     let response: Response;
     try {
@@ -973,7 +1129,7 @@ class ApiService {
     end_date?: string;
     carbon_level?: string;
     sort_by?: string;
-  } = {}): Promise<HistoryRecord[]> {
+  } = {}, signal?: AbortSignal): Promise<HistoryRecord[]> {
     const queryParams = new URLSearchParams();
     if (params.query) queryParams.append("query", params.query);
     if (params.category) queryParams.append("category", params.category);
@@ -982,7 +1138,7 @@ class ApiService {
     if (params.carbon_level) queryParams.append("carbon_level", params.carbon_level);
     if (params.sort_by) queryParams.append("sort_by", params.sort_by);
 
-    const raw = await this.request<unknown>(`/history?${queryParams.toString()}`);
+    const raw = await this.request<unknown>(`/history?${queryParams.toString()}`, { signal });
 
     // Normalize: handle array, envelope objects, and unexpected shapes
     if (Array.isArray(raw)) return raw as HistoryRecord[];
@@ -999,8 +1155,8 @@ class ApiService {
     return [];
   }
 
-  async getHistoryStats(): Promise<HistoryStats> {
-    return this.request<HistoryStats>("/history/stats");
+  async getHistoryStats(signal?: AbortSignal): Promise<HistoryStats> {
+    return this.request<HistoryStats>("/history/stats", { signal });
   }
 
   async deleteHistoryRecord(id: string): Promise<void> {
@@ -1048,26 +1204,26 @@ class ApiService {
   // GAMIFICATION ENDPOINTS (Phase H)
   // ─────────────────────────────────────────────────────────────────────────
 
-  async getGamificationProfile(username = "demo_user"): Promise<GamificationProfile> {
-    return this.request<GamificationProfile>(`/gamification/profile?username=${username}`);
+  async getGamificationProfile(): Promise<GamificationProfile> {
+    return this.request<GamificationProfile>(`/gamification/profile`);
   }
 
-  async getGamificationAchievements(username = "demo_user"): Promise<AchievementStatus[]> {
-    return this.request<AchievementStatus[]>(`/gamification/achievements?username=${username}`);
+  async getGamificationAchievements(): Promise<AchievementStatus[]> {
+    return this.request<AchievementStatus[]>(`/gamification/achievements`);
   }
 
-  async getGamificationChallenges(username = "demo_user"): Promise<{ daily: ChallengeProgress[]; weekly: ChallengeProgress[] }> {
-    return this.request<{ daily: ChallengeProgress[]; weekly: ChallengeProgress[] }>(`/gamification/challenges?username=${username}`);
+  async getGamificationChallenges(): Promise<{ daily: ChallengeProgress[]; weekly: ChallengeProgress[] }> {
+    return this.request<{ daily: ChallengeProgress[]; weekly: ChallengeProgress[] }>(`/gamification/challenges`);
   }
 
-  async getGamificationRewards(username = "demo_user"): Promise<{ success: boolean; rewards: VirtualReward[] }> {
-    return this.request<{ success: boolean; rewards: VirtualReward[] }>(`/gamification/rewards?username=${username}`);
+  async getGamificationRewards(): Promise<{ success: boolean; rewards: VirtualReward[] }> {
+    return this.request<{ success: boolean; rewards: VirtualReward[] }>(`/gamification/rewards`);
   }
 
-  async redeemVirtualReward(rewardId: string, username = "demo_user"): Promise<{ status: string; message: string; redeemed_rewards: string[] }> {
+  async redeemVirtualReward(rewardId: string): Promise<{ status: string; message: string; redeemed_rewards: string[] }> {
     return this.request<{ status: string; message: string; redeemed_rewards: string[] }>("/gamification/rewards/redeem", {
       method: "POST",
-      body: JSON.stringify({ reward_id: rewardId, username }),
+      body: JSON.stringify({ reward_id: rewardId }),
     });
   }
 
@@ -1089,6 +1245,26 @@ class ApiService {
     });
   }
 
+  async refreshToken(): Promise<string | null> {
+    return refreshAccessToken();
+  }
+
+  async logout(): Promise<void> {
+    const refreshToken = loadRefreshToken();
+    try {
+      if (refreshToken) {
+        await this.request<any>("/auth/logout", {
+          method: "POST",
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+      }
+    } catch (err) {
+      logger.warn("ApiService", "Failed to blacklist token during logout", err);
+    } finally {
+      cache.clear();
+    }
+  }
+
   async requestReset(email: string): Promise<any> {
     return this.request<any>("/auth/request-reset", {
       method: "POST",
@@ -1103,15 +1279,22 @@ class ApiService {
     });
   }
 
-  async getProfile(): Promise<ProfileResponse> {
-    return this.request<ProfileResponse>("/profile");
+  async getProfile(signal?: AbortSignal): Promise<ProfileResponse> {
+    const cached = cache.get<ProfileResponse>(CACHE_KEYS.PROFILE);
+    if (cached) return cached;
+
+    const profile = await this.request<ProfileResponse>("/profile", { signal });
+    cache.set(CACHE_KEYS.PROFILE, profile, CACHE_TTL.PROFILE);
+    return profile;
   }
 
   async updateProfile(data: any): Promise<any> {
-    return this.request<any>("/profile", {
+    const res = await this.request<any>("/profile", {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    cache.invalidate(CACHE_KEYS.PROFILE);
+    return res;
   }
 
   async uploadAvatar(file: File): Promise<any> {
@@ -1119,9 +1302,9 @@ class ApiService {
     formData.append("file", file);
 
     const headers = new Headers();
-    const token = typeof window !== "undefined" ? localStorage.getItem("carbontracker_token") : null;
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
+    const authHeader = getAuthorizationHeader();
+    if (authHeader) {
+      headers.set("Authorization", authHeader);
     }
 
     const url = `${BASE_URL}/profile/avatar`;
@@ -1152,26 +1335,63 @@ class ApiService {
   }
 
 
+  /**
+   * checkHealth — lightweight public connectivity probe.
+   * Uses GET /api/system/status (no auth required).
+   * Returns HealthStatus on success, throws on network/server failure.
+   */
   async checkHealth(): Promise<HealthStatus> {
     try {
-      const response = await fetchWithTimeout(`${HOST}/health`, {}, 15_000);
-      if (!response.ok) throw new Error(`Health check ${response.status}`);
+      const response = await fetchWithTimeout(`${HOST}/api/system/status`, {}, 10_000);
+      if (!response.ok) {
+        // 4xx/5xx: backend is reachable but returned an HTTP error
+        throw new ApiError(response.status, `Health probe returned HTTP ${response.status}`);
+      }
       const result = await response.json();
       if (result && typeof result === "object" && "data" in result) return result.data as HealthStatus;
       return result as HealthStatus;
     } catch (err) {
-      logger.warn("ApiService", "Health check failed", { error: err });
+      if (err instanceof ApiError) throw err; // re-throw HTTP errors as-is
+      logger.warn("ApiService", "Health probe network failure", { error: err });
       throw new Error("Unable to contact backend server");
     }
   }
 
-  async getSystemHealth(): Promise<SystemHealth> {
+  /**
+   * getSystemHealth — polls the public GET /api/system/status endpoint.
+   *
+   * Error mapping:
+   *   200 OK          → parse and return SystemHealth
+   *   401 / 403       → backend is online but auth/config issue; return backend:"online" with sub-services "unknown"
+   *   404             → endpoint missing; return all "degraded"
+   *   500             → server error; return backend:"error", failed:true
+   *   Network/timeout → server unreachable; return backend:"offline", failed:true
+   */
+  async getSystemHealth(signal?: AbortSignal): Promise<SystemHealth> {
     try {
-      const response = await fetchWithTimeout(`${HOST}/api/system/status`, {}, 15_000);
+      const response = await fetchWithTimeout(`${HOST}/api/system/status`, { signal }, 15_000);
 
       if (!response.ok) {
-        if (response.status === 404) {
-          logger.warn("ApiService", "System status check returned 404 - treating as degraded");
+        const status = response.status;
+
+        // 401/403 — backend is reachable, auth/config issue on this endpoint (should not normally happen
+        // since /api/system/status is public, but be defensive)
+        if (status === 401 || status === 403) {
+          logger.warn("ApiService", `System status returned ${status} — backend is reachable, treating as online`);
+          return {
+            backend: "online",
+            database: "unknown",
+            ai: "unknown",
+            ocr: "unknown",
+            cache: "unknown",
+            iot: "unknown",
+            failed: false,
+          };
+        }
+
+        // 404 — endpoint missing; degraded but reachable
+        if (status === 404) {
+          logger.warn("ApiService", "System status check returned 404 — treating as degraded");
           return {
             backend: "degraded",
             database: "degraded",
@@ -1179,40 +1399,86 @@ class ApiService {
             ocr: "degraded",
             cache: "degraded",
             iot: "degraded",
+            failed: false,
           };
         }
 
-        if (response.status === 500) {
-          logger.error("ApiService", "System status check returned 500");
-        } else {
-          logger.warn("ApiService", `System status check returned ${response.status}`);
+        // 500 — server error
+        if (status === 500) {
+          logger.error("ApiService", "System status check returned 500 — backend error");
+          return {
+            backend: "error",
+            database: "unknown",
+            ai: "unknown",
+            ocr: "unknown",
+            cache: "unknown",
+            iot: "unknown",
+            failed: true,
+          };
         }
 
+        // Other non-2xx (e.g. 503 Service Unavailable)
+        logger.warn("ApiService", `System status check returned unexpected ${status}`);
         return {
-          backend: "offline",
-          database: "offline",
-          ai: "offline",
-          ocr: "offline",
-          cache: "offline",
-          iot: "offline",
-          failed: true,
+          backend: "degraded",
+          database: "unknown",
+          ai: "unknown",
+          ocr: "unknown",
+          cache: "unknown",
+          iot: "unknown",
+          failed: false,
         };
       }
 
+      // 200 OK — parse the body
       const result = await response.json();
-      if (result && typeof result === "object" && "data" in result) {
-        return result.data as SystemHealth;
+
+      // The public endpoint returns { status: "success", data: { backend, database, version } }
+      // NOTE: The lightweight public endpoint only probes backend + database.
+      // Sub-services (ai, ocr, cache, iot) are NOT included in the response — default them to "online".
+      if (result && typeof result === "object") {
+        // Envelope format: { status: "success", data: { backend, database, version } }
+        if ("data" in result) {
+          const d = (result as any).data as Partial<SystemHealth>;
+          return {
+            backend:  d.backend  || "online",
+            database: d.database || "online",
+            ai:       d.ai       || "online",
+            ocr:      d.ocr      || "online",
+            cache:    d.cache    || "online",
+            iot:      d.iot      || "online",
+            failed:   false,
+          };
+        }
+        // Flat format: { backend: "online", database: "online" }
+        const r = result as any;
+        return {
+          backend:  r.backend  || "online",
+          database: r.database || "online",
+          ai:       r.ai       || "online",
+          ocr:      r.ocr      || "online",
+          cache:    r.cache    || "online",
+          iot:      r.iot      || "online",
+          failed:   false,
+        };
       }
+
+
       return result as SystemHealth;
     } catch (err: any) {
-      // Only use Logger.error() for 500 server errors, database failures, and unexpected exceptions
-      const is500 = err?.message?.includes("500") || err?.status === 500;
-      const isDbFailure = err?.message?.includes("database") || err?.message?.toLowerCase().includes("db");
+      // Network/timeout: true connectivity failure — server unreachable
+      const isNetworkError =
+        !err?.status && // no HTTP status → not an HTTP error
+        (err?.name === "AbortError" ||
+          err?.message?.toLowerCase().includes("failed to fetch") ||
+          err?.message?.toLowerCase().includes("network error") ||
+          err?.message?.toLowerCase().includes("timeout") ||
+          err?.message?.toLowerCase().includes("backend unavailable"));
 
-      if (is500 || isDbFailure) {
-        logger.error("ApiService", "System status fetch failed (critical/db)", { error: err });
+      if (isNetworkError) {
+        logger.warn("ApiService", "System status: network unreachable", { error: err?.message });
       } else {
-        logger.warn("ApiService", "System status fetch failed (expected polling failure)", { error: err });
+        logger.error("ApiService", "System status: unexpected exception", { error: err });
       }
 
       return {
@@ -1227,9 +1493,9 @@ class ApiService {
     }
   }
 
-  async getFeatureFlags(): Promise<Record<string, boolean>> {
+  async getFeatureFlags(signal?: AbortSignal): Promise<Record<string, boolean>> {
     try {
-      return await this.request<Record<string, boolean>>("/feature-flags");
+      return await this.request<Record<string, boolean>>("/feature-flags", { signal });
     } catch (err) {
       logger.warn("ApiService", "Failed to fetch feature flags", { error: err });
       return {};

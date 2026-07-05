@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -69,7 +69,7 @@ class JWTService:
             pass
         return False
 
-def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> User:
+def get_current_user(request: Request, db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> User:
     import os
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -78,13 +78,29 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
     )
     if not token:
         # Check if running under pytest to allow legacy test suite to pass without token
-        if "PYTEST_CURRENT_TEST" in os.environ:
+        if "PYTEST_CURRENT_TEST" in os.environ and request.headers.get("x-pytest-no-auth-bypass") != "true":
+            from app.utils.cache import global_cache
+            cache_key = "user_obj:demo_user"
+            demo_user = global_cache.get(cache_key)
+            if demo_user is not None:
+                if demo_user not in db:
+                    try:
+                        db.add(demo_user)
+                    except Exception:
+                        demo_user = db.query(User).filter(User.username == "demo_user").first()
+                return demo_user
             demo_user = db.query(User).filter(User.username == "demo_user").first()
             if not demo_user:
                 demo_user = User(username="demo_user", xp=100, level=1, email="demo@example.com")
                 db.add(demo_user)
                 db.commit()
                 db.refresh(demo_user)
+            try:
+                db.expunge(demo_user)
+                global_cache.set(cache_key, demo_user, ttl=60)
+                db.add(demo_user)
+            except Exception:
+                pass
             return demo_user
         raise credentials_exception
 
@@ -103,9 +119,30 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
     if username is None:
         raise credentials_exception
 
-    user = db.query(User).filter(User.username == username).first()
+    from app.utils.cache import global_cache
+    cache_key = f"user_obj:{username}"
+    user = global_cache.get(cache_key)
+
+    if user is None:
+        user = db.query(User).filter(User.username == username).first()
+        if user is not None:
+            try:
+                db.expunge(user)
+                global_cache.set(cache_key, user, ttl=60)
+                db.add(user)
+            except Exception:
+                pass
+
     if user is None:
         raise credentials_exception
+
+    if user not in db:
+        try:
+            db.add(user)
+        except Exception:
+            user = db.query(User).filter(User.username == username).first()
+            if user is None:
+                raise credentials_exception
     
     if not user.is_active:
         raise HTTPException(

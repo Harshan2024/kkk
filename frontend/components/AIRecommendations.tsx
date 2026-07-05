@@ -7,13 +7,16 @@ import {
 import { AIInsight } from "../services/api";
 import { getSafeCategory } from "../utils/safeCategory";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAIStore } from "../stores/aiStore";
+import { Card } from "./ui/Card";
+import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
 
 interface AIRecommendationsProps {
   insights: AIInsight[];
   loading: boolean;
 }
 
-// Icon dictionary matching the mockup
 const INSIGHT_ICONS: Record<string, { icon: any; color: string; bg: string }> = {
   transport: { icon: Car, color: "text-purple-400", bg: "bg-purple-950/20 border-purple-500/20" },
   transportation: { icon: Car, color: "text-purple-400", bg: "bg-purple-950/20 border-purple-500/20" },
@@ -23,8 +26,6 @@ const INSIGHT_ICONS: Record<string, { icon: any; color: string; bg: string }> = 
   lifestyle: { icon: Leaf, color: "text-emerald-450", bg: "bg-emerald-950/20 border-emerald-500/20" },
   food: { icon: Leaf, color: "text-emerald-450", bg: "bg-emerald-950/20 border-emerald-500/20" }
 };
-
-import { useAIStore } from "../stores/aiStore";
 
 export default function AIRecommendations({ insights, loading }: AIRecommendationsProps) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -36,30 +37,28 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
     setExpandedId(expandedId === id ? null : id);
   };
 
-  // 1. Error State (AI or DB Offline)
   if (dbStatus === "offline" || aiStatus === "offline") {
     return (
-      <div className="glass-card rounded-3xl p-5 sm:p-6 transition-all duration-300 flex flex-col justify-between h-[360px] select-none">
+      <Card className="flex flex-col justify-between h-[360px] select-none" hover={false}>
         <div>
           <div className="flex items-center space-x-2.5 pb-3 border-b border-white/5 mb-3">
             <div className="w-6 h-6 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
               <Sparkles className="w-3.5 h-3.5 text-emerald-450" />
             </div>
-            <h3 className="font-extrabold text-xs text-stone-300 uppercase tracking-widest">
+            <h3 className="font-extrabold text-xs text-theme-secondary uppercase tracking-widest">
               AI Insights
             </h3>
           </div>
-          <div className="flex flex-col items-center justify-center min-h-[200px] border border-dashed border-white/5 rounded-2xl bg-white/[0.01]">
-            <span className="text-xs font-black uppercase tracking-wider text-rose-400">
-              AI service temporarily unavailable.
+          <div className="flex flex-col items-center justify-center min-h-[200px] border border-dashed border-theme-subtle rounded-2xl bg-white/[0.01]">
+            <span className="text-xs font-black uppercase tracking-wider text-rose-455">
+              AI Service Offline
             </span>
           </div>
         </div>
-      </div>
+      </Card>
     );
   }
 
-  // Mock insights mirroring the mockup layout if empty
   const defaultInsights = [
     {
       id: 101,
@@ -106,7 +105,7 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
   const showDegraded = dbStatus === "degraded" || aiStatus === "degraded";
 
   return (
-    <div className="glass-card rounded-3xl p-5 sm:p-6 transition-all duration-300 flex flex-col justify-between h-[360px] select-none">
+    <Card className="flex flex-col justify-between h-[360px] select-none" hover={false}>
       <div>
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-white/5 mb-3">
@@ -114,18 +113,14 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
             <div className="w-6 h-6 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
               <Sparkles className="w-3.5 h-3.5 text-emerald-450" />
             </div>
-            <h3 className="font-extrabold text-xs text-stone-300 uppercase tracking-widest">
+            <h3 className="font-extrabold text-xs text-theme-secondary uppercase tracking-widest">
               AI Insights
             </h3>
           </div>
           {showDegraded ? (
-            <span className="text-[8px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider animate-pulse">
-              Running in degraded mode.
-            </span>
+            <Badge variant="warning" size="xs" dot>degraded</Badge>
           ) : (
-            <span className="text-[9px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-wider">
-              New
-            </span>
+            <Badge variant="success" size="xs" dot>New</Badge>
           )}
         </div>
 
@@ -133,12 +128,12 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
         {loading ? (
           <div className="space-y-2 animate-pulse flex flex-col justify-center items-center min-h-[220px]">
             <Sparkles className="w-6 h-6 text-amber-500 animate-spin mb-2" />
-            <span className="text-stone-400 text-[10px] font-black uppercase tracking-widest animate-pulse">Loading Insights...</span>
+            <span className="text-theme-muted text-[10px] font-black uppercase tracking-widest">Loading Insights...</span>
           </div>
         ) : activeInsights.length === 0 ? (
           <div className="flex items-center justify-center min-h-[200px]">
-            <span className="text-xs font-black uppercase tracking-wider text-stone-500">
-              No data available.
+            <span className="text-xs font-black uppercase tracking-wider text-theme-muted">
+              No insights compiled.
             </span>
           </div>
         ) : (
@@ -153,30 +148,25 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
                   <motion.div
                     whileHover={{ x: 2 }}
                     onClick={() => toggleExpand(insight.id)}
-                    className="flex items-center justify-between p-2.5 rounded-2xl border border-white/5 bg-white/[0.01] hover:bg-white/[0.02] transition-all cursor-pointer"
+                    className="flex items-center justify-between p-2.5 rounded-2xl border border-theme-subtle bg-white/[0.01] hover:bg-white/[0.02] transition-all cursor-pointer"
                   >
-                    {/* Icon & content */}
                     <div className="flex items-center space-x-3 min-w-0 flex-1">
-                      {/* Icon Container */}
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center border flex-shrink-0 ${bg}`}>
                         <Icon className={`w-4 h-4 ${color}`} />
                       </div>
                       
-                      {/* Text */}
                       <div className="min-w-0 pr-2">
-                        <p className="text-[11px] font-bold text-stone-300 leading-normal line-clamp-2">
+                        <p className="text-[11px] font-bold text-theme-secondary leading-normal line-clamp-2">
                           {insight.content}
                         </p>
                       </div>
                     </div>
 
-                    {/* Arrow / Chevron */}
-                    <div className="flex-shrink-0 text-stone-500 pr-1 group-hover:text-stone-300">
-                      <ChevronRight className={`w-4 h-4 transition-transform duration-300 ${isExpanded ? "rotate-90 text-emerald-450" : ""}`} />
+                    <div className="flex-shrink-0 text-theme-muted pr-1 group-hover:text-theme-primary">
+                      <ChevronRight className={`w-4 h-4 transition-transform duration-300 ${isExpanded ? "rotate-90 text-theme-brand" : ""}`} />
                     </div>
                   </motion.div>
 
-                  {/* Expanded Detail drawer */}
                   <AnimatePresence initial={false}>
                     {isExpanded && (
                       <motion.div
@@ -184,31 +174,31 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
                         animate={{ height: "auto", opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
                         transition={{ duration: 0.2 }}
-                        className="overflow-hidden bg-[#070b09] border-x border-b border-white/5 rounded-b-2xl -mt-2 p-3 space-y-2 text-[10px] text-stone-550 font-bold"
+                        className="overflow-hidden bg-[#070b09] border-x border-b border-theme-subtle rounded-b-2xl -mt-2 p-3 space-y-2 text-[10px] text-theme-muted font-bold"
                       >
                         {insight.why_explanation && (
                           <div>
-                            <span className="text-[8px] uppercase tracking-widest text-emerald-450 block mb-0.5">AI Reasoning</span>
-                            <p className="text-stone-400 font-medium leading-relaxed">{insight.why_explanation}</p>
+                            <span className="text-[8px] uppercase tracking-widest text-theme-brand block mb-0.5">AI Reasoning</span>
+                            <p className="text-theme-secondary font-medium leading-relaxed">{insight.why_explanation}</p>
                           </div>
                         )}
                         {insight.how_calculation && (
                           <div>
                             <span className="text-[8px] uppercase tracking-widest text-sky-400 block mb-0.5">Calculation Formula</span>
-                            <p className="text-stone-400 font-medium leading-relaxed">{insight.how_calculation}</p>
+                            <p className="text-theme-secondary font-medium leading-relaxed">{insight.how_calculation}</p>
                           </div>
                         )}
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 border-t border-white/5 pt-1.5 mt-1.5 text-[9px] text-stone-550 font-bold">
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 border-t border-white/5 pt-1.5 mt-1.5 text-[9px] text-theme-muted font-bold">
                           {typeof insight.weighted_priority_score === "number" && (
                             <div className="flex justify-between">
                               <span>Priority Score:</span>
-                              <span className="text-emerald-450">{insight.weighted_priority_score.toFixed(1)}</span>
+                              <span className="text-theme-brand">{insight.weighted_priority_score.toFixed(1)}</span>
                             </div>
                           )}
                           {(insight.impact_estimate || insight.impact_value !== undefined) && (
                             <div className="flex justify-between">
                               <span>Carbon Saved:</span>
-                              <span className="text-emerald-450">
+                              <span className="text-theme-brand">
                                 {insight.impact_estimate && insight.impact_estimate !== "Praise" 
                                   ? insight.impact_estimate 
                                   : `${insight.impact_value || 0} kg CO₂`}
@@ -218,13 +208,13 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
                           {insight.feasibility && (
                             <div className="flex justify-between">
                               <span>Feasibility:</span>
-                              <span className="text-stone-300">{insight.feasibility}</span>
+                              <span className="text-theme-secondary">{insight.feasibility}</span>
                             </div>
                           )}
                           {insight.difficulty && (
                             <div className="flex justify-between">
                               <span>Difficulty:</span>
-                              <span className="text-stone-300">{insight.difficulty}</span>
+                              <span className="text-theme-secondary">{insight.difficulty}</span>
                             </div>
                           )}
                         </div>
@@ -238,11 +228,10 @@ export default function AIRecommendations({ insights, loading }: AIRecommendatio
         )}
       </div>
 
-      {/* Get More Insights Button */}
-      <button className="w-full py-2 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 rounded-xl text-[10px] font-extrabold uppercase text-stone-400 hover:text-white transition-all flex items-center justify-center gap-1 cursor-pointer">
+      <button className="w-full py-2 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 rounded-xl text-[10px] font-extrabold uppercase text-theme-muted hover:text-theme-primary transition-all flex items-center justify-center gap-1 cursor-pointer">
         <span>Get More Insights</span>
         <ChevronRight className="w-3.5 h-3.5" />
       </button>
-    </div>
+    </Card>
   );
 }

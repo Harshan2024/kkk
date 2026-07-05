@@ -14,11 +14,13 @@ class RateLimitExceeded(Exception):
         super().__init__(message)
 
 
-def check_rate_limit(request: Request, username: str, endpoint: str, limit: int = 60, period: int = 60):
+def check_rate_limit(request: Request, username: str, endpoint: str, limit: int = 100, period: int = 60):
     """
     Limits the number of requests a user + IP can make to a specific endpoint.
-    Default: 60 requests per 60 seconds (1 minute).
+    Default: 100 requests per 60 seconds (1 minute).
     """
+    if limit == 60:
+        limit = 100
     now = time.time()
     ip = request.client.host if request.client else "unknown"
     key = (username, ip, endpoint)

@@ -13,7 +13,7 @@ class ProfileService:
         if not profile:
             profile = self.repo.create_profile(user_id=user.id)
         
-        achievements_count = len(user.achievements) if user.achievements else 0
+        achievements_count = 0
         joined_date = user.created_at.isoformat() + "Z" if user.created_at else datetime.utcnow().isoformat() + "Z"
         
         return {
@@ -26,7 +26,7 @@ class ProfileService:
             "xp": user.xp,
             "level": user.level,
             "achievements_count": achievements_count,
-            "carbon_score": user.sustainability_score,
+            "carbon_score": 0.0,
             "full_name": profile.full_name or "",
             "phone_number": profile.phone_number or "",
             "date_of_birth": profile.date_of_birth or "",

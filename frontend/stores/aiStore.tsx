@@ -24,6 +24,7 @@ import React, {
 } from "react";
 import {
   api,
+  ApiError,
   ChatMessage,
   ForecastData,
   ObservabilityMetrics,
@@ -37,6 +38,18 @@ import {
   ProfileResponse,
 } from "../services/api";
 import logger from "../utils/logger";
+import { createEmptySummary } from "../utils/validators";
+import {
+  saveToken,
+  loadToken,
+  removeToken,
+  saveUser,
+  loadUser,
+  saveRefreshToken,
+  saveLoginTimestamp,
+  isAuthenticated as checkAuthLocal,
+} from "../services/authService";
+import { healthMonitor } from "../services/healthMonitor";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONTEXT SHAPE
@@ -85,6 +98,7 @@ interface AIContextProps {
   systemHealth: SystemHealth | null;
   fetchSystemHealth: () => Promise<void>;
   forecastEnabled: boolean;
+  smartDevicesEnabled: boolean;
 
   // Analytics
   analyticsData: AnalyticsPayload | null;
@@ -141,6 +155,7 @@ export const DEFAULT_AI_CONTEXT_VALUE: AIContextProps = {
   systemHealth: null,
   fetchSystemHealth: async () => {},
   forecastEnabled: false,
+  smartDevicesEnabled: false,
   analyticsData: null,
   analyticsLoading: false,
   fetchAnalytics: async () => {},
@@ -206,12 +221,59 @@ export function AIStoreProvider({
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
+
+  // Startup phase for phased skeleton loading
+  // "init" → reading localStorage
+  // "validating" → verifying JWT with backend
+  // "loading" → loading dashboard data
+  // "ready" → all done, show UI
+  const [startupPhase, setStartupPhase] = useState<"init" | "validating" | "loading" | "ready">("init");
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
 
   // Analytics State
   const [analyticsData, setAnalyticsData] = useState<AnalyticsPayload | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const classifyError = useCallback((err: any): string => {
+    // Prefer typed ApiError.status for accurate HTTP status detection
+    const httpStatus = err instanceof ApiError ? err.status : null;
+    const msg = err?.message || String(err);
+
+    // 401 / 403: authentication / authorisation — NOT a connectivity failure
+    if (httpStatus === 401 || httpStatus === 403 ||
+        msg.includes("401") || msg.includes("403") ||
+        msg.toLowerCase().includes("session expired") ||
+        msg.toLowerCase().includes("credentials")) {
+      return "Session expired. Please login again.";
+    }
+    // 404: endpoint missing
+    if (httpStatus === 404 || msg.includes("404")) {
+      return "Dashboard service unavailable.";
+    }
+    // 500: server-side error — backend is reachable but broken
+    if (httpStatus === 500 || msg.includes("500") || msg.toLowerCase().includes("internal server error")) {
+      return "Unexpected server error.";
+    }
+    // True network/connectivity failure: no HTTP status, and matches network error patterns
+    const isNetworkFailure =
+      !httpStatus &&
+      (msg.toLowerCase().includes("failed to fetch") ||
+        msg.toLowerCase().includes("network error") ||
+        msg.toLowerCase().includes("backend unavailable") ||
+        msg.toLowerCase().includes("connection timeout") ||
+        msg.toLowerCase().includes("connection error"));
+    if (isNetworkFailure) {
+      return "Unable to connect to backend.";
+    }
+    // Timeout: no HTTP status, explicit timeout message
+    if (!httpStatus && msg.toLowerCase().includes("timeout")) {
+      return "Connection timed out. Please check the backend is running.";
+    }
+    return msg || "Unexpected server error.";
+  }, []);
+
 
   const forecastEnabled = useMemo(() => {
     const envVal = process.env.NEXT_PUBLIC_FORECAST_ENABLED;
@@ -226,16 +288,26 @@ export function AIStoreProvider({
     }
     return false;
   }, [featureFlags]);
+ 
+  const smartDevicesEnabled = useMemo(() => {
+    if (featureFlags.enable_smart_devices !== undefined) {
+      return featureFlags.enable_smart_devices;
+    }
+    return false;
+  }, [featureFlags]);
 
   // Unmount abort controller
   const abortRef = useRef<AbortController | null>(null);
   const prevDbStatusRef = useRef<string | null>(null);
+  // Stable ref to logout to avoid forward-reference in useCallback deps
+  const logoutRef = useRef<() => void>(() => {});
 
   // Request deduplication refs
   const isDashboardLoadingRef = useRef(false);
   const isSystemHealthLoadingRef = useRef(false);
   const isDeferredLoadingRef = useRef(false);
   const isChatHistoryLoadingRef = useRef(false);
+  const isAnalyticsLoadingRef = useRef(false);
 
   // Status syncing refs for polling loop
   const systemHealthRef = useRef<SystemHealth | null>(null);
@@ -278,23 +350,51 @@ export function AIStoreProvider({
     isDashboardLoadingRef.current = true;
     setLoading(true);
     setError(null);
+    setRetryCount(0); // reset automatic retry counter on manual load trigger
+
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    const abortCtrl = new AbortController();
+    abortRef.current = abortCtrl;
+    const signal = abortCtrl.signal;
+
+    const savedToken = loadToken();
+    if (!savedToken) {
+      logger.info("aiStore", "loadDashboardData: no token found, aborting");
+      setLoading(false);
+      isDashboardLoadingRef.current = false;
+      return;
+    }
 
     try {
-      const summaryResult = await fetchWithRetry(() => api.getDashboardSummary(activeUsername));
+      logger.info("aiStore", "[DEBUG] loadDashboardData → calling getDashboardSummary (JWT in header)");
+      const summaryResult = await fetchWithRetry(() => api.getDashboardSummary(signal));
       if (summaryResult) {
         setSummary(summaryResult);
+        setError(null);
+        logger.info("aiStore", "[DEBUG] loadDashboardData → getDashboardSummary SUCCESS");
       } else {
-        logger.error("aiStore", "getDashboardSummary failed");
-        setError("Unable to load dashboard summary.");
+        logger.warn("aiStore", "getDashboardSummary returned null, using safe empty defaults");
+        setSummary(createEmptySummary());
+        setError(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       logger.error("aiStore", "getDashboardSummary failed", err);
-      setError("Cannot reach CarbonTracker API. Start the backend server and refresh.");
+      const classified = classifyError(err);
+      if (classified === "Session expired. Please login again.") {
+        logoutRef.current();
+      } else {
+        logger.warn("aiStore", `Using fallback empty summary due to: ${classified}`);
+        setSummary(createEmptySummary());
+        setToastError(`Dashboard summary unavailable: ${classified}`);
+        setError(null);
+      }
     } finally {
       setLoading(false);
       isDashboardLoadingRef.current = false;
     }
-  }, [activeUsername, fetchWithRetry]);
+  }, [fetchWithRetry, classifyError]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // SILENT BACKGROUND REFRESH
@@ -302,18 +402,18 @@ export function AIStoreProvider({
 
   const silentDashboardRefresh = useCallback(async () => {
     try {
-      const summaryData = await api.getDashboardSummary(activeUsername);
+      const summaryData = await api.getDashboardSummary();
       if (summaryData) {
         setSummary(summaryData);
       }
       // Silently refresh the other deferred endpoints in background
-      api.getInsights(activeUsername).then((res) => setInsights(res ?? [])).catch(() => {});
-      api.getAchievements(activeUsername).then((res) => setAchievements(res ?? [])).catch(() => {});
-      api.getActivities(activeUsername).then((res) => setActivities(res ?? [])).catch(() => {});
+      api.getInsights().then((res) => setInsights(res ?? [])).catch(() => {});
+      api.getAchievements().then((res) => setAchievements(res ?? [])).catch(() => {});
+      api.getActivities().then((res) => setActivities(res ?? [])).catch(() => {});
     } catch (err) {
       logger.warn("aiStore", "Silent background refresh failed", err);
     }
-  }, [activeUsername]);
+  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
   // OPTIMISTIC ACTIVITY LOGGING
@@ -400,7 +500,7 @@ export function AIStoreProvider({
 
       // 4. Background DB persistence
       try {
-        const realActivity = await api.logActivity(text, activeUsername, activeRegion);
+        const realActivity = await api.logActivity(text, activeRegion);
         setActivities((prev) =>
           prev.map((act) => (act.id === optimisticId ? realActivity : act))
         );
@@ -429,7 +529,7 @@ export function AIStoreProvider({
     isChatHistoryLoadingRef.current = true;
     setChatLoading(true);
     try {
-      const history = await api.getChatHistory(activeUsername);
+      const history = await api.getChatHistory();
       setChatMessages(history ?? []);
     } catch (err) {
       logger.error("aiStore", "fetchChatHistory failed", err);
@@ -438,7 +538,7 @@ export function AIStoreProvider({
       setChatLoading(false);
       isChatHistoryLoadingRef.current = false;
     }
-  }, [activeUsername]);
+  }, []);
 
   const sendChatMessage = useCallback(
     async (message: string): Promise<string> => {
@@ -454,7 +554,7 @@ export function AIStoreProvider({
       setChatLoading(true);
 
       try {
-        const result = await api.postChat(message, activeUsername, 30_000);
+        const result = await api.postChat(message, 30_000);
         const assistantMsg: ChatMessage = {
           id: Date.now() + 1,
           role: "assistant",
@@ -500,7 +600,7 @@ export function AIStoreProvider({
       }
       setForecastLoading(true);
       try {
-        const res = await api.getForecast(activeUsername, steps, model, generate);
+        const res = await api.getForecast(steps, model, generate);
         setForecastData(res.data ?? []);
         setForecastStatus(res.status ?? null);
       } catch (err: any) {
@@ -520,20 +620,20 @@ export function AIStoreProvider({
         setForecastLoading(false);
       }
     },
-    [activeUsername, forecastEnabled]
+    [forecastEnabled]
   );
 
   const fetchMetrics = useCallback(async () => {
     setMetricsLoading(true);
     try {
-      const data = await api.getObservabilityMetrics(activeUsername);
+      const data = await api.getObservabilityMetrics();
       setMetrics(data ?? null);
     } catch (err) {
       logger.error("aiStore", "fetchMetrics failed", err);
     } finally {
       setMetricsLoading(false);
     }
-  }, [activeUsername]);
+  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
   // RECEIPT UPLOAD
@@ -550,7 +650,7 @@ export function AIStoreProvider({
         throw new Error("Database temporarily unavailable. Running in read-only mode.");
       }
       try {
-        const res = await api.uploadMultimodal(file, activeUsername, activeRegion);
+        const res = await api.uploadMultimodal(file, activeRegion);
         silentDashboardRefresh();
         return res;
       } catch (err) {
@@ -558,7 +658,7 @@ export function AIStoreProvider({
         throw err;
       }
     },
-    [activeUsername, silentDashboardRefresh]
+    [silentDashboardRefresh]
   );
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -576,12 +676,12 @@ export function AIStoreProvider({
         return;
       }
       try {
-        await api.correctActivity(original, corrected, category, activeUsername);
+        await api.correctActivity(original, corrected, category);
       } catch (err) {
         logger.error("aiStore", "submitCorrection failed", err);
       }
     },
-    [activeUsername]
+    []
   );
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -601,17 +701,17 @@ export function AIStoreProvider({
     setForecastLoading(false);
     setChatLoading(true);
 
-    const insightsPromise = fetchWithRetry(() => api.getInsights(activeUsername))
+    const insightsPromise = fetchWithRetry(() => api.getInsights())
       .then((res) => setInsights(res ?? []))
       .catch(() => setInsights([]))
       .finally(() => setInsightsLoading(false));
 
-    const achievementsPromise = fetchWithRetry(() => api.getAchievements(activeUsername))
+    const achievementsPromise = fetchWithRetry(() => api.getAchievements())
       .then((res) => setAchievements(res ?? []))
       .catch(() => setAchievements([]))
       .finally(() => setAchievementsLoading(false));
 
-    const activitiesPromise = fetchWithRetry(() => api.getActivities(activeUsername))
+    const activitiesPromise = fetchWithRetry(() => api.getActivities())
       .then((res) => setActivities(res ?? []))
       .catch(() => setActivities([]))
       .finally(() => setActivitiesLoading(false));
@@ -620,7 +720,7 @@ export function AIStoreProvider({
 
     await Promise.allSettled([insightsPromise, achievementsPromise, activitiesPromise, chatPromise]);
     isDeferredLoadingRef.current = false;
-  }, [activeUsername, fetchWithRetry, fetchChatHistory]);
+  }, [fetchWithRetry, fetchChatHistory]);
 
   const fetchSystemHealth = useCallback(async () => {
     if (isSystemHealthLoadingRef.current) {
@@ -666,9 +766,14 @@ export function AIStoreProvider({
   }, [loadDashboardData]);
 
   const fetchAnalytics = useCallback(async () => {
+    if (isAnalyticsLoadingRef.current) {
+      logger.info("aiStore", "fetchAnalytics already in progress, skipping duplicate call");
+      return;
+    }
+    isAnalyticsLoadingRef.current = true;
     setAnalyticsLoading(true);
     try {
-      const data = await api.getAnalytics(activeUsername);
+      const data = await api.getAnalytics();
       setAnalyticsData(data ?? DEFAULT_ANALYTICS);
     } catch (err) {
       logger.error("aiStore", "fetchAnalytics failed", err);
@@ -676,8 +781,9 @@ export function AIStoreProvider({
       setToastError("Unable to load analytics dashboard data.");
     } finally {
       setAnalyticsLoading(false);
+      isAnalyticsLoadingRef.current = false;
     }
-  }, [activeUsername]);
+  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
   // INITIAL LOAD + DEFERRED LOADING
@@ -695,17 +801,28 @@ export function AIStoreProvider({
   // Authentication Actions
   const login = useCallback(async (email: string, password: string): Promise<boolean> => {
     try {
+      logger.info("aiStore", `[DEBUG] login → POST /auth/login for email: ${email}`);
       const tokenData = await api.login(email, password);
       if (tokenData && tokenData.access_token) {
-        localStorage.setItem("carbontracker_token", tokenData.access_token);
+        logger.info("aiStore", "[DEBUG] login → access_token received, saving to storage");
+        saveToken(tokenData.access_token);
+        // Save refresh token if provided by backend
+        if (tokenData.refresh_token) {
+          saveRefreshToken(tokenData.refresh_token);
+          logger.info("aiStore", "[DEBUG] login → refresh_token saved");
+        }
+        saveLoginTimestamp();
         setToken(tokenData.access_token);
         setIsAuthenticated(true);
-        // Load profile immediately
+        // Load profile immediately after token is saved
+        logger.info("aiStore", "[DEBUG] login → calling getProfile to hydrate user state");
         const profile = await api.getProfile();
-        localStorage.setItem("carbontracker_user", JSON.stringify(profile));
+        saveUser(profile);
         setUser(profile);
+        logger.info("aiStore", `[DEBUG] login → profile loaded for: ${profile.username}`);
         return true;
       }
+      logger.warn("aiStore", "[DEBUG] login → no access_token in tokenData response");
       return false;
     } catch (err: any) {
       logger.error("aiStore", "Login failed", err);
@@ -726,8 +843,11 @@ export function AIStoreProvider({
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem("carbontracker_token");
-    localStorage.removeItem("carbontracker_user");
+    logger.info("aiStore", "[DEBUG] logout → clearing token and user from storage");
+    api.logout().catch((err) => {
+      logger.warn("aiStore", "api.logout failed", err);
+    });
+    removeToken();
     setToken(null);
     setUser(null);
     setIsAuthenticated(false);
@@ -739,12 +859,42 @@ export function AIStoreProvider({
     setAnalyticsData(null);
   }, []);
 
+  // Keep logoutRef in sync so loadDashboardData can call logout without circular deps
+  useEffect(() => {
+    logoutRef.current = logout;
+  }, [logout]);
+
+  // Listen for ct:force-logout event dispatched by api.ts when refresh token is expired
+  useEffect(() => {
+    const handleForceLogout = () => {
+      logger.warn("aiStore", "[DEBUG] ct:force-logout event received — clearing session");
+      logout();
+    };
+    window.addEventListener("ct:force-logout", handleForceLogout);
+    return () => window.removeEventListener("ct:force-logout", handleForceLogout);
+  }, [logout]);
+
+  // Subscribe to background health monitor events
+  useEffect(() => {
+    const handleHealth = (e: Event) => {
+      const health = (e as CustomEvent).detail;
+      if (health) setSystemHealth(health);
+    };
+    window.addEventListener("carbontracker:health", handleHealth);
+    // Start the health monitor singleton
+    healthMonitor.start();
+    return () => {
+      window.removeEventListener("carbontracker:health", handleHealth);
+    };
+  }, []);
+
   const updateProfile = useCallback(async (username: string, email: string): Promise<boolean> => {
     try {
-      const res = await api.updateProfile(username, email);
+      logger.info("aiStore", `[DEBUG] updateProfile → PUT /profile for user: ${username}`);
+      const res = await api.updateProfile({ username, email });
       if (res?.success !== false) {
         const profile = await api.getProfile();
-        localStorage.setItem("carbontracker_user", JSON.stringify(profile));
+        saveUser(profile);
         setUser(profile);
         return true;
       }
@@ -756,39 +906,226 @@ export function AIStoreProvider({
     }
   }, []);
 
-  // Critical startup load and auto-login
-  useEffect(() => {
-    const savedToken = localStorage.getItem("carbontracker_token");
-    const savedUser = localStorage.getItem("carbontracker_user");
-    if (savedToken) {
-      setToken(savedToken);
-      setIsAuthenticated(true);
-      if (savedUser) {
-        try {
-          setUser(JSON.parse(savedUser));
-        } catch {
-          // ignore
-        }
-      }
-      // Validate saved token & fetch latest profile
-      api.getProfile()
-        .then((profile) => {
-          localStorage.setItem("carbontracker_user", JSON.stringify(profile));
-          setUser(profile);
-        })
-        .catch((err) => {
-          logger.warn("aiStore", "Failed to validate saved token, logging out", err);
-          logout();
-        });
-    }
-    
-    loadDashboardData();
-    fetchSystemHealth();
+  // Centralized deterministic startup sequence
+  const startup = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setStartupPhase("init");
+    logger.info("aiStore", "[DEBUG] Executing centralized startup sequence");
 
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    const abortCtrl = new AbortController();
+    abortRef.current = abortCtrl;
+    const signal = abortCtrl.signal;
+
+    // 1. Initialize Authentication & Local JWT validation
+    const savedToken = loadToken();
+    const savedUser = loadUser<ReturnType<typeof JSON.parse>>();
+
+    if (!savedToken) {
+      logger.info("aiStore", "[DEBUG] startup → No token in storage → unauthenticated");
+      setToken(null);
+      setUser(null);
+      setIsAuthenticated(false);
+      setLoading(false);
+      setStartupPhase("ready");
+      return;
+    }
+
+    // Decode JWT token locally to verify expiration and structure integrity
+    let isInvalidOrExpired = false;
+    try {
+      const parts = savedToken.split(".");
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1]));
+        if (payload.exp && payload.exp * 1000 < Date.now()) {
+          isInvalidOrExpired = true;
+          logger.warn("aiStore", "[DEBUG] startup → Saved JWT token has expired locally.");
+        } else {
+          logger.info("aiStore", `[DEBUG] startup → JWT local check OK. Expires: ${new Date(payload.exp * 1000).toISOString()}`);
+        }
+      } else {
+        isInvalidOrExpired = true;
+        logger.warn("aiStore", "[DEBUG] startup → Invalid JWT format in localStorage.");
+      }
+    } catch (e) {
+      isInvalidOrExpired = true;
+      logger.warn("aiStore", "[DEBUG] startup → Failed to decode JWT.", e);
+    }
+
+    if (isInvalidOrExpired) {
+      logger.warn("aiStore", "[DEBUG] startup → Token expired/corrupt locally → trying refresh token");
+      setStartupPhase("validating");
+      try {
+        const newAccessToken = await api.refreshToken();
+        if (newAccessToken) {
+          logger.info("aiStore", "[DEBUG] startup → Refresh token success, got new access token");
+          setToken(newAccessToken);
+          setIsAuthenticated(true);
+        } else {
+          throw new Error("No new access token returned");
+        }
+      } catch (err) {
+        logger.warn("aiStore", "[DEBUG] startup → Refresh token failed/absent → clearing session", err);
+        removeToken();
+        setToken(null);
+        setUser(null);
+        setIsAuthenticated(false);
+        setLoading(false);
+        setStartupPhase("ready");
+        return;
+      }
+    }
+
+    // Assign token to state before making any API calls
+    setToken(savedToken);
+    setIsAuthenticated(true);
+    if (savedUser) {
+      try {
+        setUser(savedUser as any);
+      } catch {
+        // ignore
+      }
+    }
+
+    // 3. Backend JWT validation — verify token is still accepted by the server
+    setStartupPhase("validating");
+    let currentProfile: ProfileResponse | null = null;
+    try {
+      logger.info("aiStore", "[DEBUG] startup → Verifying token with backend via GET /profile");
+      currentProfile = await api.getProfile(signal);
+      saveUser(currentProfile);
+      setUser(currentProfile);
+      logger.info("aiStore", `[DEBUG] startup → Backend JWT validation OK for user: ${currentProfile.username}`);
+    } catch (err: any) {
+      logger.error("aiStore", "[DEBUG] startup → Backend JWT token validation failed", err);
+      const httpStatus = err instanceof ApiError ? err.status : null;
+      const msg = err?.message || String(err);
+
+      // AbortError: request was cancelled intentionally (React StrictMode double-mount,
+      // component unmount cleanup, or manual abort). This is NOT a connectivity failure.
+      // Silently ignore — the second mount will retry successfully.
+      if (err?.name === "AbortError" || signal.aborted) {
+        logger.info("aiStore", "[DEBUG] startup → Profile fetch was aborted (StrictMode/unmount) — ignoring");
+        return;
+      }
+
+      // 401/403 — token rejected by backend: clear it and redirect to login
+      const isAuthError =
+        httpStatus === 401 ||
+        httpStatus === 403 ||
+        msg.includes("401") ||
+        msg.includes("403") ||
+        msg.toLowerCase().includes("credentials") ||
+        msg.toLowerCase().includes("signature");
+
+      if (isAuthError) {
+        logger.warn("aiStore", "[DEBUG] startup → Auth error from backend → clearing token");
+        removeToken();
+        setToken(null);
+        setUser(null);
+        setIsAuthenticated(false);
+        setLoading(false);
+        return;
+      }
+
+      // HTTP error with a status code: backend IS reachable but returned an error.
+      // Do NOT show "Unable to connect" — show the real server error message.
+      if (httpStatus) {
+        logger.warn("aiStore", `[DEBUG] startup → Profile fetch returned HTTP ${httpStatus} — backend reachable`);
+        setError(`Backend returned an error (HTTP ${httpStatus}). Please try again.`);
+        setLoading(false);
+        return;
+      }
+
+      // No HTTP status: genuine network/timeout failure.
+      logger.warn("aiStore", "[DEBUG] startup → Network/timeout error reaching backend");
+      setError("Unable to connect to backend.");
+      setLoading(false);
+      return;
+    }
+
+    // 4. Fetch System Health & status
+    try {
+      logger.info("aiStore", "Loading system health status");
+      const health = await api.getSystemHealth(signal);
+      setSystemHealth(health);
+      
+      const currentDbStatus = health?.database || "online";
+      if (health && !health.failed && (currentDbStatus === "offline" || currentDbStatus === "degraded")) {
+        setError("Reconnecting to database...");
+      }
+
+      // Feature flags
+      try {
+        const flags = await api.getFeatureFlags(signal);
+        setFeatureFlags(flags);
+      } catch (flagErr) {
+        logger.warn("aiStore", "Failed to fetch feature flags during startup", flagErr);
+      }
+    } catch (err) {
+      logger.warn("aiStore", "Failed to check system health during startup", err);
+    }
+
+    // 5. Load Dashboard Summary
+    try {
+      logger.info("aiStore", `[DEBUG] startup → Loading dashboard summary (JWT in Authorization header)`);
+      const summaryResult = await api.getDashboardSummary(signal);
+      if (summaryResult) {
+        setSummary(summaryResult);
+        logger.info("aiStore", "[DEBUG] startup → getDashboardSummary SUCCESS");
+      } else {
+        logger.warn("aiStore", "getDashboardSummary returned null during startup, using safe empty defaults");
+        setSummary(createEmptySummary());
+      }
+    } catch (err: any) {
+      logger.error("aiStore", "[DEBUG] startup → Failed to load dashboard summary", err);
+      const classified = classifyError(err);
+      if (classified === "Session expired. Please login again.") {
+        logoutRef.current();
+        return;
+      }
+      logger.warn("aiStore", `Using fallback empty summary on startup due to: ${classified}`);
+      setSummary(createEmptySummary());
+      setToastError(`Dashboard summary unavailable: ${classified}`);
+    }
+
+    // 6. Deferred/Background loader of list data
+    setStartupPhase("loading");
+    try {
+      api.getInsights(signal).then((res) => setInsights(res ?? [])).catch(() => {});
+      api.getAchievements(signal).then((res) => setAchievements(res ?? [])).catch(() => {});
+      api.getActivities(20, 0, signal).then((res) => setActivities(res ?? [])).catch(() => {});
+      fetchChatHistory();
+    } catch (err) {
+      logger.warn("aiStore", "Failed loading background data during startup", err);
+    }
+
+    setLoading(false);
+    setStartupPhase("ready");
+  }, [fetchChatHistory, classifyError]);
+
+  // Critical startup load on mount
+  useEffect(() => {
+    startup();
     return () => {
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [loadDashboardData, fetchSystemHealth, logout]);
+  }, [startup]);
+
+  // Automatic retry on retryable errors (network/summary failure)
+  useEffect(() => {
+    if (error && error !== "Reconnecting to database..." && retryCount < 3) {
+      const timer = setTimeout(() => {
+        logger.info("aiStore", `Auto-retrying dashboard load (attempt ${retryCount + 1}/3)`);
+        setRetryCount((prev) => prev + 1);
+        loadDashboardData();
+      }, 5000 * Math.pow(2, retryCount)); // 5s, 10s, 20s
+      return () => clearTimeout(timer);
+    }
+  }, [error, retryCount, loadDashboardData]);
 
   // Controlled polling loop — runs once and schedules dynamically based on synced refs
   useEffect(() => {
@@ -866,6 +1203,7 @@ export function AIStoreProvider({
       systemHealth,
       fetchSystemHealth,
       forecastEnabled,
+      smartDevicesEnabled,
       analyticsData,
       analyticsLoading,
       fetchAnalytics,
@@ -877,6 +1215,7 @@ export function AIStoreProvider({
       logout,
       updateProfile,
       username: activeUsername,
+      startupPhase,
     }),
     [
       summary, insights, insightsLoading, achievements, achievementsLoading,
@@ -885,9 +1224,10 @@ export function AIStoreProvider({
       chatMessages, chatLoading, forecastData, forecastLoading, forecastStatus, metrics,
       metricsLoading, isRecording, transcript, fetchChatHistory,
       sendChatMessage, fetchForecast, fetchMetrics, uploadReceipt,
-      submitCorrection, systemHealth, fetchSystemHealth, forecastEnabled,
+      submitCorrection, systemHealth, fetchSystemHealth, forecastEnabled, smartDevicesEnabled,
       analyticsData, analyticsLoading, fetchAnalytics,
       user, isAuthenticated, token, login, register, logout, updateProfile, activeUsername,
+      startupPhase,
     ]
   );
 

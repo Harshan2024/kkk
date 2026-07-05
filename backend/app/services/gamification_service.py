@@ -55,15 +55,12 @@ def get_level_info(xp: int) -> dict:
     }
 
 def calculate_streaks(db: Session, user_id: int) -> dict:
-    """
-    Computes daily logging, carbon reduction, and sustainability score streaks.
-    Returns:
-        current_streak (int): Consecutive days user logged.
-        longest_streak (int): Longest consecutive logged days.
-        carbon_streak (int): Consecutive days emissions <= 5.0 kg.
-        score_streak (int): Consecutive days sustainability score >= 85.
-        monthly_performance (list): Binary indicator of logging performance over the last 30 days.
-    """
+    from app.utils.cache import global_cache
+    cache_key = f"streaks:{user_id}"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     today = date.today()
     
     # Query daily scores sorted by date descending with a limit to optimize performance, then reverse
@@ -140,19 +137,23 @@ def calculate_streaks(db: Session, user_id: int) -> dict:
         d = today - timedelta(days=i)
         monthly_performance.append(1 if d in logged_dates else 0)
         
-    return {
+    res = {
         "current_streak": current_streak,
         "longest_streak": longest_streak,
         "carbon_streak": carbon_streak,
         "score_streak": score_streak,
         "monthly_performance": monthly_performance
     }
+    global_cache.set(cache_key, res, ttl=300)
+    return res
 
 def generate_and_track_quests(db: Session, user_id: int) -> list[dict]:
-    """
-    Dynamically generates sustainability quests based on recent 7-day activity metrics.
-    Computes live quest progress using actual activity logs.
-    """
+    from app.utils.cache import global_cache
+    cache_key = f"quests:{user_id}"
+    cached = global_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     today = date.today()
     one_week_ago = datetime.combine(today - timedelta(days=7), datetime.min.time())
     
@@ -272,12 +273,18 @@ def generate_and_track_quests(db: Session, user_id: int) -> list[dict]:
         "color": "text-emerald-550 bg-emerald-600/10 border-emerald-500/10"
     })
     
+    global_cache.set(cache_key, quests, ttl=300)
     return quests
 
 def calculate_user_xp_and_level(db: Session, user_id: int, streaks=None, quests=None, ach_count=None) -> dict:
-    """
-    Computes total user XP and resolves their Level name and badge unlocks.
-    """
+    from app.utils.cache import global_cache
+    is_cacheable = streaks is None and quests is None and ach_count is None
+    if is_cacheable:
+        cache_key = f"xp_level:{user_id}"
+        cached = global_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
     # 1. Base default XP
     total_xp = 150
     
@@ -319,7 +326,7 @@ def calculate_user_xp_and_level(db: Session, user_id: int, streaks=None, quests=
     # Resolve Level Details
     lvl_details = get_level_info(total_xp)
     
-    return {
+    res = {
         "xp": total_xp,
         "level": lvl_details["level"],
         "level_name": lvl_details["name"],
@@ -327,6 +334,9 @@ def calculate_user_xp_and_level(db: Session, user_id: int, streaks=None, quests=
         "max_xp": lvl_details["max_xp"],
         "progress_pct": lvl_details["progress_pct"]
     }
+    if is_cacheable:
+        global_cache.set(cache_key, res, ttl=300)
+    return res
 
 def check_and_unlock_achievements_v2(db: Session, user_id: int, new_activity: Activity) -> list[Achievement]:
     """

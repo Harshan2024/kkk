@@ -14,20 +14,22 @@ import {
   ChevronDown,
   ChevronUp,
   Search,
-  Filter,
-  Download,
-  BarChart2,
   Calendar,
   ChevronLeft,
   ChevronRight,
   TrendingDown,
-  Award
+  Award,
+  Download,
+  BarChart2
 } from "lucide-react";
 import { api, HistoryRecord, HistoryStats } from "../services/api";
 import { motion, AnimatePresence } from "framer-motion";
+import { Card } from "./ui/Card";
+import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
 
 interface ActivityHistoryProps {
-  activities?: any[]; // Keep props for backwards compatibility but we will fetch from history endpoints
+  activities?: any[]; // For backwards compatibility
   loading?: boolean;
 }
 
@@ -44,15 +46,15 @@ const CATEGORY_ICONS: Record<string, any> = {
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
-  food: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20",
-  transport: "text-sky-500 bg-sky-500/10 border-sky-500/20",
-  electricity: "text-amber-500 bg-amber-500/10 border-amber-500/20",
-  energy: "text-amber-500 bg-amber-500/10 border-amber-500/20",
-  appliances: "text-indigo-500 bg-indigo-500/10 border-indigo-500/20",
-  shopping: "text-purple-500 bg-purple-500/10 border-purple-500/20",
-  waste: "text-rose-500 bg-rose-500/10 border-rose-500/20",
-  water: "text-cyan-500 bg-cyan-500/10 border-cyan-500/20",
-  lifestyle: "text-slate-500 bg-slate-500/10 border-slate-500/20",
+  food: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+  transport: "text-sky-400 bg-sky-500/10 border-sky-500/20",
+  electricity: "text-amber-400 bg-amber-500/10 border-amber-500/20",
+  energy: "text-amber-400 bg-amber-500/10 border-amber-500/20",
+  appliances: "text-indigo-400 bg-indigo-500/10 border-indigo-500/20",
+  shopping: "text-purple-400 bg-purple-500/10 border-purple-500/20",
+  waste: "text-rose-450 bg-rose-500/10 border-rose-500/20",
+  water: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20",
+  lifestyle: "text-stone-400 bg-stone-500/10 border-stone-500/20",
 };
 
 export default function ActivityHistory({}: ActivityHistoryProps) {
@@ -60,6 +62,7 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
   const [records, setRecords] = useState<HistoryRecord[]>([]);
   const [stats, setStats] = useState<HistoryStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Filters, Search, Sort states
   const [searchQuery, setSearchQuery] = useState("");
@@ -76,10 +79,10 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
   // UI Expansion list
   const [expandedRecords, setExpandedRecords] = useState<Record<string, boolean>>({});
 
-  const fetchHistoryData = async () => {
+  const fetchHistoryData = async (signal?: AbortSignal) => {
     setIsLoading(true);
+    setError(null);
     try {
-      // Call standard endpoints
       const fetchedRecords = await api.getHistoryList({
         query: searchQuery || undefined,
         category: selectedCategory === "all" ? undefined : selectedCategory,
@@ -87,8 +90,8 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
         end_date: endDate || undefined,
         carbon_level: carbonLevel === "all" ? undefined : carbonLevel,
         sort_by: sortBy,
-      });
-      // Triple-guard: ensure result is always an array before setting state
+      }, signal);
+
       const safeRecords = Array.isArray(fetchedRecords)
         ? fetchedRecords
         : Array.isArray((fetchedRecords as any)?.data)
@@ -98,17 +101,25 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
         : [];
       setRecords(safeRecords);
 
-      const fetchedStats = await api.getHistoryStats();
+      const fetchedStats = await api.getHistoryStats(signal);
       setStats(fetchedStats);
-    } catch (err) {
+    } catch (err: any) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
       console.error("Failed to load history data layer", err);
+      setError(err?.message || "Failed to load activity history");
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchHistoryData();
+    const controller = new AbortController();
+    fetchHistoryData(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [searchQuery, selectedCategory, carbonLevel, startDate, endDate, sortBy]);
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
@@ -138,7 +149,6 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
     }
   };
 
-  // Pagination calculation — guard records to always be an array
   const safeRecords = Array.isArray(records) ? records : [];
   const totalItems = safeRecords.length;
   const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
@@ -148,7 +158,7 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
   const getIcon = (category: string) => {
     const cat = category.toLowerCase();
     const IconComponent = CATEGORY_ICONS[cat] || Leaf;
-    const colorClass = CATEGORY_COLORS[cat] || "text-emerald-500 bg-emerald-500/10 border-emerald-500/20";
+    const colorClass = CATEGORY_COLORS[cat] || "text-emerald-450 bg-emerald-500/10 border-emerald-500/20";
     
     return (
       <div className={`w-8 h-8 rounded-lg border flex items-center justify-center ${colorClass}`}>
@@ -175,101 +185,96 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
 
   return (
     <div className="space-y-6 select-none">
-      {/* ───────────────────────────────────────────────────────────────────────
-          STATISTICS DASHBOARD GRID (Module 10)
-      ─────────────────────────────────────────────────────────────────────── */}
+      {/* STATISTICS DASHBOARD GRID */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         {/* Stat 1: Total Activities */}
-        <div className="glass-card rounded-2xl p-4 border border-white/5 bg-white/[0.01] hover:border-emerald-500/10 transition-all duration-300">
-          <span className="text-[9px] font-black uppercase tracking-widest text-stone-500 flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 text-stone-400" />
+        <Card className="p-4" hover={false}>
+          <span className="text-[9px] font-black uppercase tracking-widest text-theme-muted flex items-center gap-1.5">
+            <Clock className="w-3.5 h-3.5" />
             Total Logs
           </span>
-          <div className="mt-2 text-xl font-black text-white">
-            {stats?.total_activities ?? 0} <span className="text-[10px] text-stone-400 font-bold uppercase">items</span>
+          <div className="mt-2 text-xl font-black text-theme-primary">
+            {stats?.total_activities ?? 0} <span className="text-[10px] text-theme-muted font-bold uppercase">items</span>
           </div>
-        </div>
+        </Card>
 
         {/* Stat 2: Total Carbon */}
-        <div className="glass-card rounded-2xl p-4 border border-white/5 bg-white/[0.01] hover:border-sky-500/10 transition-all duration-300">
-          <span className="text-[9px] font-black uppercase tracking-widest text-stone-500 flex items-center gap-1.5">
+        <Card className="p-4" hover={false}>
+          <span className="text-[9px] font-black uppercase tracking-widest text-theme-muted flex items-center gap-1.5">
             <TrendingDown className="w-3.5 h-3.5 text-sky-450" />
             Total CO₂
           </span>
-          <div className="mt-2 text-xl font-black text-white">
-            {(stats?.total_carbon ?? 0).toFixed(1)} <span className="text-[10px] text-sky-400 font-bold uppercase">kg</span>
+          <div className="mt-2 text-xl font-black text-theme-primary">
+            {(stats?.total_carbon ?? 0).toFixed(1)} <span className="text-[10px] text-theme-muted font-bold uppercase">kg</span>
           </div>
-        </div>
+        </Card>
 
         {/* Stat 3: Average Carbon */}
-        <div className="glass-card rounded-2xl p-4 border border-white/5 bg-white/[0.01] hover:border-amber-500/10 transition-all duration-300">
-          <span className="text-[9px] font-black uppercase tracking-widest text-stone-500 flex items-center gap-1.5">
+        <Card className="p-4" hover={false}>
+          <span className="text-[9px] font-black uppercase tracking-widest text-theme-muted flex items-center gap-1.5">
             <BarChart2 className="w-3.5 h-3.5 text-amber-500" />
             Average CO₂
           </span>
-          <div className="mt-2 text-xl font-black text-white">
-            {(stats?.average_carbon ?? 0).toFixed(1)} <span className="text-[10px] text-amber-500 font-bold uppercase">kg</span>
+          <div className="mt-2 text-xl font-black text-theme-primary">
+            {(stats?.average_carbon ?? 0).toFixed(1)} <span className="text-[10px] text-theme-muted font-bold uppercase">kg</span>
           </div>
-        </div>
+        </Card>
 
         {/* Stat 4: Most Frequent Activity */}
-        <div className="glass-card rounded-2xl p-4 border border-white/5 bg-white/[0.01] hover:border-purple-500/10 transition-all duration-300 xl:col-span-1">
-          <span className="text-[9px] font-black uppercase tracking-widest text-stone-500 flex items-center gap-1.5">
+        <Card className="p-4" hover={false}>
+          <span className="text-[9px] font-black uppercase tracking-widest text-theme-muted flex items-center gap-1.5">
             <ActivityIcon className="w-3.5 h-3.5 text-purple-400" />
             Frequent
           </span>
-          <div className="mt-2 text-xs font-bold text-white truncate" title={stats?.most_frequent_activity}>
+          <div className="mt-2 text-xs font-bold text-theme-primary truncate" title={stats?.most_frequent_activity}>
             {stats?.most_frequent_activity || "N/A"}
           </div>
-        </div>
+        </Card>
 
         {/* Stat 5: Highest Carbon Activity */}
-        <div className="glass-card rounded-2xl p-4 border border-white/5 bg-white/[0.01] hover:border-rose-500/10 transition-all duration-300 xl:col-span-1">
-          <span className="text-[9px] font-black uppercase tracking-widest text-stone-500 flex items-center gap-1.5">
-            <Award className="w-3.5 h-3.5 text-rose-550" />
+        <Card className="p-4 animate-glow-pulse" hover={false}>
+          <span className="text-[9px] font-black uppercase tracking-widest text-theme-muted flex items-center gap-1.5">
+            <Award className="w-3.5 h-3.5 text-rose-450" />
             Peak Source
           </span>
           <div className="mt-2 text-xs font-bold text-rose-400 truncate" title={stats?.highest_carbon_activity}>
             {stats?.highest_carbon_activity || "N/A"}
           </div>
-        </div>
+        </Card>
 
         {/* Stat 6: Lowest Carbon Activity */}
-        <div className="glass-card rounded-2xl p-4 border border-white/5 bg-white/[0.01] hover:border-emerald-500/10 transition-all duration-300 xl:col-span-1">
-          <span className="text-[9px] font-black uppercase tracking-widest text-stone-500 flex items-center gap-1.5">
+        <Card className="p-4" hover={false}>
+          <span className="text-[9px] font-black uppercase tracking-widest text-theme-muted flex items-center gap-1.5">
             <Leaf className="w-3.5 h-3.5 text-emerald-450" />
             Eco Source
           </span>
-          <div className="mt-2 text-xs font-bold text-emerald-400 truncate" title={stats?.lowest_carbon_activity}>
+          <div className="mt-2 text-xs font-bold text-theme-brand truncate" title={stats?.lowest_carbon_activity}>
             {stats?.lowest_carbon_activity || "N/A"}
           </div>
-        </div>
+        </Card>
       </div>
 
-      {/* ───────────────────────────────────────────────────────────────────────
-          FILTERS, SORTING, SEARCH & EXPORT (Modules 5, 6, 8, 9)
-      ─────────────────────────────────────────────────────────────────────── */}
-      <div className="glass-card rounded-3xl p-5 border border-white/5 bg-white/[0.01] space-y-4">
-        {/* Controls Layout */}
+      {/* FILTERS & SEARCH ROW */}
+      <Card className="p-5 space-y-4" hover={false}>
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
-          {/* Search bar (Module 6) */}
+          {/* Search bar */}
           <div className="lg:col-span-4 relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-550" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-theme-muted" />
             <input
               type="text"
-              placeholder="Search activity name, category or date..."
+              placeholder="Search history query, categories, tags..."
               value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-              className="w-full bg-stone-900 border border-white/5 rounded-2xl pl-10 pr-4 py-2.5 text-stone-200 text-xs font-semibold placeholder-stone-550 focus:outline-none focus:border-forest-500"
+              className="w-full bg-theme-elevated border border-theme-subtle rounded-2xl pl-10 pr-4 py-2.5 text-theme-primary text-xs font-semibold placeholder-theme-muted focus:outline-none focus:border-[rgba(var(--brand-primary)/0.4)]"
             />
           </div>
 
-          {/* Category Select Filter (Module 5) */}
+          {/* Category Select Filter */}
           <div className="lg:col-span-2">
             <select
               value={selectedCategory}
               onChange={(e) => { setSelectedCategory(e.target.value); setCurrentPage(1); }}
-              className="w-full bg-stone-900 border border-white/5 rounded-2xl px-3 py-2.5 text-stone-300 text-xs font-bold focus:outline-none focus:border-forest-500 cursor-pointer"
+              className="w-full bg-theme-elevated border border-theme-subtle rounded-2xl px-3 py-2.5 text-theme-secondary text-xs font-bold focus:outline-none focus:border-[rgba(var(--brand-primary)/0.4)] cursor-pointer"
             >
               <option value="all">All Categories</option>
               <option value="transport">Transport</option>
@@ -279,12 +284,12 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
             </select>
           </div>
 
-          {/* Carbon Level Filter (Module 5) */}
+          {/* Carbon Level Filter */}
           <div className="lg:col-span-2">
             <select
               value={carbonLevel}
               onChange={(e) => { setCarbonLevel(e.target.value); setCurrentPage(1); }}
-              className="w-full bg-stone-900 border border-white/5 rounded-2xl px-3 py-2.5 text-stone-300 text-xs font-bold focus:outline-none focus:border-forest-500 cursor-pointer"
+              className="w-full bg-theme-elevated border border-theme-subtle rounded-2xl px-3 py-2.5 text-theme-secondary text-xs font-bold focus:outline-none focus:border-[rgba(var(--brand-primary)/0.4)] cursor-pointer"
             >
               <option value="all">All Carbon Levels</option>
               <option value="low">Low Carbon (≤ 1.0kg)</option>
@@ -292,12 +297,12 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
             </select>
           </div>
 
-          {/* Sort selection (Module 8) */}
+          {/* Sort selection */}
           <div className="lg:col-span-2">
             <select
               value={sortBy}
               onChange={(e) => { setSortBy(e.target.value); setCurrentPage(1); }}
-              className="w-full bg-stone-900 border border-white/5 rounded-2xl px-3 py-2.5 text-stone-300 text-xs font-bold focus:outline-none focus:border-forest-500 cursor-pointer"
+              className="w-full bg-theme-elevated border border-theme-subtle rounded-2xl px-3 py-2.5 text-theme-secondary text-xs font-bold focus:outline-none focus:border-[rgba(var(--brand-primary)/0.4)] cursor-pointer"
             >
               <option value="latest">Latest Logs</option>
               <option value="oldest">Oldest Logs</option>
@@ -308,29 +313,21 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
             </select>
           </div>
 
-          {/* Exports (Module 9) */}
+          {/* Export triggers */}
           <div className="lg:col-span-2 flex gap-2">
-            <button
-              onClick={() => handleExport("csv")}
-              className="flex-1 py-2.5 bg-white/5 hover:bg-forest-600/10 border border-white/5 hover:border-forest-500/20 text-stone-300 hover:text-white rounded-2xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-            >
-              <Download className="w-3.5 h-3.5" />
+            <Button variant="secondary" size="sm" className="flex-1" onClick={() => handleExport("csv")}>
               CSV
-            </button>
-            <button
-              onClick={() => handleExport("json")}
-              className="flex-1 py-2.5 bg-white/5 hover:bg-forest-600/10 border border-white/5 hover:border-forest-500/20 text-stone-300 hover:text-white rounded-2xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-            >
-              <Download className="w-3.5 h-3.5" />
+            </Button>
+            <Button variant="secondary" size="sm" className="flex-1" onClick={() => handleExport("json")}>
               JSON
-            </button>
+            </Button>
           </div>
         </div>
 
-        {/* Date Filters row */}
+        {/* Date filters row */}
         <div className="flex flex-wrap items-center gap-4 border-t border-white/5 pt-3.5">
-          <span className="text-[10px] font-black text-stone-500 uppercase tracking-widest flex items-center gap-1">
-            <Calendar className="w-3.5 h-3.5 text-stone-405" />
+          <span className="text-[10px] font-black text-theme-muted uppercase tracking-widest flex items-center gap-1">
+            <Calendar className="w-3.5 h-3.5" />
             Date Range Filter:
           </span>
           <div className="flex items-center gap-2">
@@ -338,39 +335,40 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
               type="date"
               value={startDate}
               onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }}
-              className="bg-stone-900 border border-white/5 rounded-xl px-2 py-1 text-stone-300 text-[10px] font-bold focus:outline-none focus:border-forest-500 cursor-pointer"
+              className="bg-theme-elevated border border-theme-subtle rounded-xl px-2 py-1 text-theme-secondary text-[10px] font-bold focus:outline-none cursor-pointer"
             />
-            <span className="text-stone-550 text-xs font-semibold">to</span>
+            <span className="text-theme-muted text-xs font-semibold">to</span>
             <input
               type="date"
               value={endDate}
               onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }}
-              className="bg-stone-900 border border-white/5 rounded-xl px-2 py-1 text-stone-300 text-[10px] font-bold focus:outline-none focus:border-forest-500 cursor-pointer"
+              className="bg-theme-elevated border border-theme-subtle rounded-xl px-2 py-1 text-theme-secondary text-[10px] font-bold focus:outline-none cursor-pointer"
             />
           </div>
           {(startDate || endDate || selectedCategory !== "all" || carbonLevel !== "all" || searchQuery) && (
-            <button
-              onClick={() => {
-                setStartDate("");
-                setEndDate("");
-                setSelectedCategory("all");
-                setCarbonLevel("all");
-                setSearchQuery("");
-                setCurrentPage(1);
-              }}
-              className="text-[9px] font-black uppercase tracking-wider text-rose-450 hover:text-rose-400 bg-rose-500/10 hover:bg-rose-500/15 border border-rose-500/10 rounded-lg px-2 py-1.5 transition-all cursor-pointer"
-            >
+            <Button variant="ghost" size="xs" onClick={() => {
+              setStartDate("");
+              setEndDate("");
+              setSelectedCategory("all");
+              setCarbonLevel("all");
+              setSearchQuery("");
+              setCurrentPage(1);
+            }}>
               Clear Filters
-            </button>
+            </Button>
           )}
         </div>
-      </div>
+      </Card>
 
-      {/* ───────────────────────────────────────────────────────────────────────
-          ACTIVITY HISTORY LEDGER / TIMELINE DISPLAY
-      ─────────────────────────────────────────────────────────────────────── */}
-      <div className="glass-card rounded-3xl p-6 sm:p-8 border border-white/5 bg-white/[0.01]">
-        {isLoading ? (
+      {/* HISTORY TIMELINE DISPLAY */}
+      <Card className="p-6 sm:p-8" hover={false}>
+        {error && !isLoading ? (
+          <div className="flex flex-col items-center justify-center min-h-[220px] text-center select-none p-6">
+            <span className="text-xs text-rose-455 font-bold uppercase tracking-wider mb-2">Failed to load history</span>
+            <span className="text-[10px] text-theme-muted font-semibold max-w-[250px] mb-4">{error}</span>
+            <Button size="xs" onClick={() => fetchHistoryData()}>Retry</Button>
+          </div>
+        ) : isLoading ? (
           <div className="space-y-4 animate-pulse">
             {[1, 2, 3].map((i) => (
               <div key={i} className="h-[90px] rounded-2xl bg-white/5 border border-white/5"></div>
@@ -383,7 +381,7 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
               return (
                 <div
                   key={record.id}
-                  className="rounded-2xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.03] transition-all duration-300 overflow-hidden cursor-pointer"
+                  className="rounded-2xl border border-theme-subtle bg-white/[0.01] hover:bg-white/[0.03] transition-all duration-300 overflow-hidden cursor-pointer"
                   onClick={() => toggleExpand(record.id)}
                 >
                   {/* Card Header Row */}
@@ -394,46 +392,44 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
                         {(record.categories ?? []).map((cat) => getIcon(cat))}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-xs font-extrabold text-stone-400 uppercase tracking-wider">
+                        <p className="text-xs font-extrabold text-theme-muted uppercase tracking-wider">
                           Logged: {formatDateTime(record.timestamp)}
                         </p>
-                        <p className="text-sm font-semibold text-white mt-1 truncate">
+                        <p className="text-sm font-semibold text-theme-primary mt-1 truncate">
                           {(record.activities ?? []).map((a) => a?.name ?? "unknown").join(", ")}
                         </p>
                       </div>
                     </div>
 
-                    {/* Right block: total emissions, delete, expand */}
+                    {/* Right block */}
                     <div className="flex items-center justify-between sm:justify-end gap-5">
                       <div className="text-right">
-                        <div className="text-base font-black text-white">
+                        <div className="text-base font-black text-theme-primary">
                           {(record.total_carbon ?? 0.0).toFixed(2)}{" "}
-                          <span className="text-[10px] font-normal text-stone-550">kg CO2e</span>
+                          <span className="text-[10px] font-normal text-theme-muted">kg CO2e</span>
                         </div>
-                        <span className="text-[8px] font-black uppercase tracking-widest text-stone-500 bg-white/5 border border-white/5 px-2 py-0.5 rounded-md mt-1 inline-block">
+                        <span className="text-[8px] font-black uppercase tracking-widest text-theme-muted bg-white/5 border border-white/5 px-2 py-0.5 rounded-md mt-1 inline-block">
                           {record.source ?? "manual"}
                         </span>
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {/* Delete Button */}
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="xs"
                           onClick={(e) => handleDelete(record.id, e)}
-                          className="p-2 bg-rose-500/5 hover:bg-rose-500/10 border border-rose-500/10 hover:border-rose-500/30 text-rose-450 hover:text-rose-400 rounded-xl transition-all cursor-pointer active:scale-95"
-                          title="Delete Record"
+                          style={{ width: "32px", height: "32px", padding: 0 }}
                         >
-                          <Trash2 className="w-4.5 h-4.5" />
-                        </button>
-                        
-                        {/* Expand Icon */}
-                        <div className="p-2 text-stone-400 hover:text-white rounded-xl">
-                          {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                          <Trash2 className="w-4 h-4 text-rose-400" />
+                        </Button>
+                        <div className="p-2 text-theme-muted hover:text-theme-primary">
+                          {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Expanded entities view showing factors & formulas */}
+                  {/* Expanded view */}
                   <AnimatePresence>
                     {isExpanded && (
                       <motion.div
@@ -444,33 +440,31 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
                         onClick={(e) => e.stopPropagation()}
                       >
                         <div className="p-4.5 space-y-3">
-                          {(record.activities ?? []).map((item, idx) => {
-                            return (
-                              <div
-                                key={idx}
-                                className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border border-white/5 bg-white/[0.01] rounded-xl text-xs font-semibold gap-3"
-                              >
-                                <div className="flex items-center gap-3">
-                                  {getIcon(item?.category ?? "lifestyle")}
-                                  <div>
-                                    <div className="text-stone-200 font-bold">{item?.name ?? "unknown"}</div>
-                                    <div className="text-[10px] text-stone-500 uppercase font-black tracking-wider mt-0.5">
-                                      Category: {item?.category ?? "lifestyle"} • Quantity: {item?.quantity ?? 0} {item?.unit ?? "units"}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div className="sm:text-right flex flex-row sm:flex-col justify-between sm:justify-center items-center sm:items-end gap-2">
-                                  <div className="text-[10px] font-bold text-stone-400">
-                                    Formula: <code className="bg-stone-900 border border-white/5 px-1.5 py-0.5 rounded text-amber-500">{item?.formula || `${item?.quantity ?? 0} * ${item?.factor ?? 0}`}</code>
-                                  </div>
-                                  <div className="text-white font-extrabold text-xs">
-                                    {Number(item?.carbon ?? item?.subtotal ?? 0.0).toFixed(2)} kg
+                          {(record.activities ?? []).map((item, idx) => (
+                            <div
+                              key={idx}
+                              className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border border-theme-subtle bg-white/[0.01] rounded-xl text-xs font-semibold gap-3"
+                            >
+                              <div className="flex items-center gap-3">
+                                {getIcon(item?.category ?? "lifestyle")}
+                                <div>
+                                  <div className="text-theme-primary font-bold">{item?.name ?? "unknown"}</div>
+                                  <div className="text-[10px] text-theme-muted uppercase font-black tracking-wider mt-0.5">
+                                    Category: {item?.category ?? "lifestyle"} • Quantity: {item?.quantity ?? 0} {item?.unit ?? "units"}
                                   </div>
                                 </div>
                               </div>
-                            );
-                          })}
+
+                              <div className="sm:text-right flex flex-row sm:flex-col justify-between sm:justify-center items-center sm:items-end gap-2">
+                                <div className="text-[10px] font-bold text-theme-muted">
+                                  Formula: <code className="bg-stone-900 border border-white/5 px-1.5 py-0.5 rounded text-amber-500">{item?.formula || `${item?.quantity ?? 0} * ${item?.factor ?? 0}`}</code>
+                                </div>
+                                <div className="text-theme-primary font-extrabold text-xs">
+                                  {Number(item?.carbon ?? item?.subtotal ?? 0.0).toFixed(2)} kg
+                                </div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </motion.div>
                     )}
@@ -482,24 +476,24 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
             {/* Pagination Controls */}
             {totalPages > 1 && (
               <div className="flex items-center justify-between border-t border-white/5 pt-4 mt-6">
-                <span className="text-[10px] font-bold text-stone-500">
+                <span className="text-[10px] font-bold text-theme-muted">
                   Showing {startIndex + 1} - {Math.min(startIndex + itemsPerPage, totalItems)} of {totalItems} records
                 </span>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                     disabled={currentPage === 1}
-                    className="p-1.5 rounded-xl border border-white/5 bg-white/5 text-stone-400 hover:text-white disabled:opacity-30 disabled:hover:text-stone-400 transition-all cursor-pointer"
+                    className="p-1.5 rounded-xl border border-theme-subtle bg-white/5 text-theme-secondary hover:text-theme-primary disabled:opacity-30 transition-all cursor-pointer"
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
-                  <span className="text-xs font-extrabold text-stone-300 px-2">
+                  <span className="text-xs font-extrabold text-theme-primary px-2">
                     Page {currentPage} of {totalPages}
                   </span>
                   <button
                     onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                     disabled={currentPage === totalPages}
-                    className="p-1.5 rounded-xl border border-white/5 bg-white/5 text-stone-400 hover:text-white disabled:opacity-30 disabled:hover:text-stone-400 transition-all cursor-pointer"
+                    className="p-1.5 rounded-xl border border-theme-subtle bg-white/5 text-theme-secondary hover:text-theme-primary disabled:opacity-30 transition-all cursor-pointer"
                   >
                     <ChevronRight className="w-4 h-4" />
                   </button>
@@ -508,13 +502,13 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
             )}
           </div>
         ) : (
-          <div className="text-center py-12 text-xs text-stone-500 flex flex-col items-center justify-center">
+          <div className="text-center py-12 text-xs text-theme-muted flex flex-col items-center justify-center">
             <Leaf className="w-10 h-10 text-emerald-500/20 mb-3 animate-pulse" />
-            <p className="font-semibold text-stone-400">No activity log history entries match your current search / filters.</p>
-            <p className="text-stone-550 mt-1">Start logging carbon activities using the Logger Studio!</p>
+            <p className="font-semibold text-theme-secondary">No activity log history entries match search query.</p>
+            <p className="text-theme-muted mt-1">Start logging carbon activities using the Logger Studio!</p>
           </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }
