@@ -110,7 +110,10 @@ export default function AdminPage() {
   const fetchDashboard = async () => {
     try {
       const token = typeof window !== "undefined"
-        ? localStorage.getItem("carbon_access_token") || sessionStorage.getItem("carbon_access_token")
+        ? (window.localStorage ? window.localStorage.getItem("carbon_access_token") : null) ||
+          (window.sessionStorage ? window.sessionStorage.getItem("carbon_access_token") : null) ||
+          (window.sessionStorage ? window.sessionStorage.getItem("carbontracker_token") : null) ||
+          (window.localStorage ? window.localStorage.getItem("carbontracker_token") : null)
         : null;
 
       const res = await fetch(`${API_BASE}/api/v1/admin/health-dashboard`, {

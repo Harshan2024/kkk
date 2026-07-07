@@ -22,25 +22,25 @@ const LOGIN_TS_KEY      = "carbontracker_login_ts";
 // ACCESS TOKEN
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Save the JWT access token to localStorage (single call-site). */
+/** Save the JWT access token to sessionStorage (single call-site). */
 export function saveToken(token: string): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(TOKEN_KEY, token);
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return;
+  window.sessionStorage.setItem(TOKEN_KEY, token);
 }
 
 /** Load the raw JWT string, or null if missing. */
 export function loadToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(TOKEN_KEY);
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return null;
+  return window.sessionStorage.getItem(TOKEN_KEY);
 }
 
-/** Remove ALL auth data from localStorage (access, refresh, user, timestamp). */
+/** Remove ALL auth data from sessionStorage (access, refresh, user, timestamp). */
 export function removeToken(): void {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
-  localStorage.removeItem(LOGIN_TS_KEY);
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return;
+  window.sessionStorage.removeItem(TOKEN_KEY);
+  window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+  window.sessionStorage.removeItem(USER_KEY);
+  window.sessionStorage.removeItem(LOGIN_TS_KEY);
 }
 
 /**
@@ -79,22 +79,22 @@ export function getAuthorizationHeader(): string | null {
 // REFRESH TOKEN
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Save the JWT refresh token to localStorage. */
+/** Save the JWT refresh token to sessionStorage. */
 export function saveRefreshToken(token: string): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(REFRESH_TOKEN_KEY, token);
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return;
+  window.sessionStorage.setItem(REFRESH_TOKEN_KEY, token);
 }
 
 /** Load the refresh token, or null if missing. */
 export function loadRefreshToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return null;
+  return window.sessionStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
 /** Remove only the refresh token (access token preserved). */
 export function removeRefreshToken(): void {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return;
+  window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
 /**
@@ -119,16 +119,16 @@ export function hasValidRefreshToken(): boolean {
 // USER PROFILE CACHE
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Save the user profile object to localStorage. */
+/** Save the user profile object to sessionStorage. */
 export function saveUser(user: object): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return;
+  window.sessionStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 /** Load the cached user profile, or null. */
 export function loadUser<T = unknown>(): T | null {
-  if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(USER_KEY);
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return null;
+  const raw = window.sessionStorage.getItem(USER_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as T;
@@ -143,14 +143,14 @@ export function loadUser<T = unknown>(): T | null {
 
 /** Record the unix-ms timestamp when the user logged in. */
 export function saveLoginTimestamp(): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(LOGIN_TS_KEY, String(Date.now()));
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return;
+  window.sessionStorage.setItem(LOGIN_TS_KEY, String(Date.now()));
 }
 
 /** Load the login timestamp, or null if not stored. */
 export function loadLoginTimestamp(): number | null {
-  if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(LOGIN_TS_KEY);
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return null;
+  const raw = window.sessionStorage.getItem(LOGIN_TS_KEY);
   if (!raw) return null;
   const parsed = parseInt(raw, 10);
   return isNaN(parsed) ? null : parsed;
@@ -165,4 +165,35 @@ export function getSessionAgeMinutes(): number | null {
   if (ts === null) return null;
   return Math.floor((Date.now() - ts) / 60_000);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STARTUP CHECK — Clear legacy localStorage tokens if session is not active
+// ─────────────────────────────────────────────────────────────────────────────
+if (typeof window !== "undefined" && typeof window.sessionStorage !== "undefined") {
+  if (!window.sessionStorage.getItem("carbontracker_session_active")) {
+    try {
+      window.localStorage.removeItem(TOKEN_KEY);
+      window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+      window.localStorage.removeItem(USER_KEY);
+      window.localStorage.removeItem(LOGIN_TS_KEY);
+    } catch (e) {
+      // ignore
+    }
+    try {
+      window.sessionStorage.removeItem(TOKEN_KEY);
+      window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+      window.sessionStorage.removeItem(USER_KEY);
+      window.sessionStorage.removeItem(LOGIN_TS_KEY);
+    } catch (e) {
+      // ignore
+    }
+    try {
+      window.sessionStorage.setItem("carbontracker_session_active", "true");
+    } catch (e) {
+      // ignore
+    }
+  }
+}
+
+
 

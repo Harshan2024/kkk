@@ -50,6 +50,7 @@ import {
   isAuthenticated as checkAuthLocal,
 } from "../services/authService";
 import { healthMonitor } from "../services/healthMonitor";
+import { cache } from "../services/cache";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONTEXT SHAPE
@@ -722,6 +723,31 @@ export function AIStoreProvider({
     isDeferredLoadingRef.current = false;
   }, [fetchWithRetry, fetchChatHistory]);
 
+  const checkServerRestart = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const metricsData = await api.getObservabilityMetrics(signal) as any;
+      const uptime = metricsData?.system?.uptime_seconds;
+      if (typeof uptime === "number") {
+        const currentBootTime = Date.now() - uptime * 1000;
+        if (typeof window !== "undefined" && typeof window.sessionStorage !== "undefined") {
+          const savedBootTime = window.sessionStorage.getItem("carbontracker_boot_time");
+          window.sessionStorage.setItem("carbontracker_boot_time", String(currentBootTime));
+          if (savedBootTime) {
+            const diff = Math.abs(parseFloat(savedBootTime) - currentBootTime);
+            if (diff > 10000) { // 10 seconds difference tolerance
+              logger.warn("aiStore", "[DEBUG] Server restart detected! Logging out.");
+              logoutRef.current();
+              return true;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn("aiStore", "Failed to verify server boot time", err);
+    }
+    return false;
+  }, []);
+
   const fetchSystemHealth = useCallback(async () => {
     if (isSystemHealthLoadingRef.current) {
       logger.info("aiStore", "fetchSystemHealth already in progress, skipping duplicate call");
@@ -731,6 +757,9 @@ export function AIStoreProvider({
     try {
       const health = await api.getSystemHealth();
       setSystemHealth(health);
+      
+      // Check for server restart during health poll
+      await checkServerRestart();
       
       try {
         const flags = await api.getFeatureFlags();
@@ -763,7 +792,7 @@ export function AIStoreProvider({
     } finally {
       isSystemHealthLoadingRef.current = false;
     }
-  }, [loadDashboardData]);
+  }, [loadDashboardData, checkServerRestart]);
 
   const fetchAnalytics = useCallback(async () => {
     if (isAnalyticsLoadingRef.current) {
@@ -919,6 +948,17 @@ export function AIStoreProvider({
     const abortCtrl = new AbortController();
     abortRef.current = abortCtrl;
     const signal = abortCtrl.signal;
+
+    // Clear client-side TTL caches on startup
+    cache.clear();
+
+    // Check if localhost server restarted
+    const restarted = await checkServerRestart(signal);
+    if (restarted) {
+      setLoading(false);
+      setStartupPhase("ready");
+      return;
+    }
 
     // 1. Initialize Authentication & Local JWT validation
     const savedToken = loadToken();
