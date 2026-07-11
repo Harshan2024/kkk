@@ -1,34 +1,31 @@
 # Dependency Audit Report — CarbonTracker AI
 
 **Date:** 2026-07-11  
-**Audit Scope:** Production and Development dependency verification.  
+**Audit Scope:** Database driver dependencies, runtime safety verification, and environment checks.  
 **Release Target:** v1.0.0  
-**Status:** ✅ CERTIFIED / ENVIRONMENT COMPLETE  
+**Status:** ✅ RESOLVED / DEPENDENCIES RESOLVED  
 
 ---
 
-## 1. Package Status Verification
+## 1. Updated Dependencies Registry
 
-All core python libraries are installed in the virtual environment `c:\Users\tutyr\Downloads\Harshan\New\.venv`:
+To ensure full compatibility with dynamic hosting environments (such as Render) and support SQLAlchemy async sessions, we updated [requirements.txt](file:///c:/Users/tutyr/Downloads/Harshan/New/backend/requirements.txt) to explicitly list the asynchronous PostgreSQL and SQLite drivers:
 
-| Library | Version | Status | Verification Note |
+- **asyncpg**: Installed version `0.31.0` (production database async driver).
+- **aiosqlite**: Installed version `0.22.1` (development/testing database async fallback driver).
+
+---
+
+## 2. Python 3.12 Virtual Environment Status
+
+All primary runtime and development packages resolve with zero warnings or package collisions:
+
+| Library | Version | Dialect Scope | Verified |
 | :--- | :--- | :--- | :--- |
-| **fastapi** | `0.136.1` | ✅ Verified | Core router API engine |
-| **uvicorn** | `0.47.0` | ✅ Verified | ASGI server process |
-| **sqlalchemy** | `2.0.49` | ✅ Verified | Connection pool & ORM |
-| **psycopg2-binary**| `2.9.12` | ✅ Verified | PostgreSQL driver |
-| **asyncpg** | `0.31.0` | ✅ Verified | Async PostgreSQL driver |
-| **PyJWT** | `2.13.0` | ✅ Verified | Token signature & security |
-| **bcrypt** | `4.1.2` | ✅ Verified | Secure password hashing |
-| **python-multipart**| `0.0.9` | ✅ Verified | Multipart file uploads |
-| **pydantic** | `2.6.4` | ✅ Verified | Schemas validation |
-| **spacy** | `3.7.4` | ✅ Verified | Spacy NLP engine |
-| **aiosqlite** | `0.20.0` | ✅ Verified | Async SQLite test driver |
-| **pytest** | `9.1.1` | ✅ Verified | Testing suite framework |
-| **locust** | `2.44.4` | ✅ Verified | Load testing framework |
-
----
-
-## 2. Integrity Checks
-- **circular Imports:** verified with static analysis tool. None detected.
-- **version Compatibility:** Checked library releases. No compatibility warnings raised during server process startup.
+| **fastapi** | `0.136.1` | REST Engine Framework | Yes |
+| **uvicorn** | `0.47.0` | ASGI Web Server | Yes |
+| **sqlalchemy** | `2.0.49` | Core SQL engine & connection mapping | Yes |
+| **psycopg2-binary**| `2.9.12` | PostgreSQL (Sync Driver) | Yes |
+| **asyncpg** | `0.31.0` | PostgreSQL (Async Driver) | Yes |
+| **aiosqlite** | `0.22.1` | SQLite (Async Driver) | Yes |
+| **spacy** | `3.7.4` | NLP parser & text analytics | Yes |
