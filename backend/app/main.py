@@ -142,11 +142,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title=settings.PROJECT_NAME,
-    description="CarbonTracker AI — Production-Grade Sustainability Operating System",
-    version="2.0.0",
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    lifespan=lifespan,
+    title="CarbonTracker API",
+    version="1.4.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
 )
 
 # Register global FastAPI exception handler directly
