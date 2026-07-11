@@ -48,7 +48,8 @@ RUN mkdir -p /app/static/avatars /app/logs \
 
 # Copy application source
 COPY --chown=carbontracker:carbontracker app/ ./app/
-COPY --chown=carbontracker:carbontracker .env.production .env 2>/dev/null || true
+# Do NOT copy .env files.
+# Render injects environment variables securely.
 
 # Switch to non-root user
 USER carbontracker
@@ -58,17 +59,10 @@ EXPOSE 8001
 
 # Health check — uses public endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8001/api/system/status || exit 1
+    CMD curl -f http://localhost:${PORT:-8001}/api/system/status || exit 1
 
 # Download spaCy model at build time (cached in image)
 RUN python -m spacy download en_core_web_sm --quiet || true
 
 # Production server command
-CMD ["python", "-m", "uvicorn", "app.main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8001", \
-     "--workers", "2", \
-     "--log-level", "info", \
-     "--access-log", \
-     "--proxy-headers", \
-     "--forwarded-allow-ips", "*"]
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001} --workers 2 --log-level info --access-log --proxy-headers --forwarded-allow-ips '*'"]
