@@ -146,7 +146,8 @@ app = FastAPI(
     version="1.4.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
+    lifespan=lifespan
 )
 
 # Register global FastAPI exception handler directly
@@ -357,11 +358,11 @@ async def add_security_headers_middleware(request: Request, call_next):
     # Strict but compatible Content Security Policy (CSP)
     csp_directives = (
         "default-src 'self'; "
-        "img-src 'self' data: blob:; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "img-src 'self' data: blob: https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
         "font-src 'self' https://fonts.gstatic.com; "
         "connect-src 'self' http://localhost:8001 http://127.0.0.1:8001 http://localhost:3001 http://localhost:3000 http://127.0.0.1:3000 http://127.0.0.1:3001; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval';"
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net;"
     )
     response.headers["Content-Security-Policy"] = csp_directives
     return response
