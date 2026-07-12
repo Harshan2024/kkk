@@ -115,6 +115,7 @@ interface AIContextProps {
   logout: () => void;
   updateProfile: (username: string, email: string) => Promise<boolean>;
   username: string;
+  startupPhase: "init" | "validating" | "loading" | "ready";
 }
 
 export const AIContext = createContext<AIContextProps | undefined>(undefined);
@@ -168,6 +169,7 @@ export const DEFAULT_AI_CONTEXT_VALUE: AIContextProps = {
   logout: () => {},
   updateProfile: async () => false,
   username: "demo_user",
+  startupPhase: "init",
 };
 
 export function useAIStore() {
@@ -725,7 +727,7 @@ export function AIStoreProvider({
 
   const checkServerRestart = useCallback(async (signal?: AbortSignal) => {
     try {
-      const metricsData = await api.getObservabilityMetrics(signal) as any;
+      const metricsData = await api.getObservabilityMetrics() as any;
       const uptime = metricsData?.system?.uptime_seconds;
       if (typeof uptime === "number") {
         const currentBootTime = Date.now() - uptime * 1000;

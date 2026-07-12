@@ -49,9 +49,9 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
   const [logging, setLogging] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [activeTab, setActiveTab] = useState("ai");
-  const [loggedImpact, setLoggedImpact] = useState<{ value: number; item: string } | null>(null);
+  const [hideSuccess, setHideSuccess] = useState(false);
   
-  const { logActivity } = useAIStore();
+  const { logActivity, activities } = useAIStore();
 
   // Debounced API call for real-time parsing preview
   useEffect(() => {
@@ -91,19 +91,12 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
     e.preventDefault();
     if (!inputText.trim() || logging) return;
 
-    if (parseResult && parseResult.parsed) {
-      setLoggedImpact({
-        value: parseResult?.calculated_value ?? 0.0,
-        item: parseResult?.parsed?.item ?? "Unknown"
-      });
-      setTimeout(() => setLoggedImpact(null), 10000);
-    }
-
     setLogging(true);
     try {
       await logActivity(inputText, region);
       setInputText("");
       setParseResult(null);
+      setHideSuccess(false);
     } catch (err: any) {
       console.error(err);
     } finally {
@@ -452,7 +445,7 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
 
       {/* Comparison Success Box */}
       <AnimatePresence>
-        {loggedImpact && (
+        {activities && activities.length > 0 && !hideSuccess && (
           <motion.div 
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -465,14 +458,14 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
                 Logged successfully to database
               </h5>
               <p className="font-bold text-theme-secondary">
-                Generated <span className="text-theme-primary font-extrabold">{loggedImpact.value.toFixed(2)} kg CO₂</span> for <span className="capitalize text-theme-primary">"{loggedImpact.item}"</span>.
+                Generated <span className="text-theme-primary font-extrabold">{activities[0].calculated_value.toFixed(2)} kg CO₂</span> for <span className="capitalize text-theme-primary">"{activities[0].item || activities[0].input_text}"</span>.
               </p>
               <p className="text-[10px] text-theme-muted mt-1 leading-normal font-bold">
-                Equivalent to charging <span className="text-theme-brand font-extrabold">{Math.round(loggedImpact.value * 120)}</span> smartphones, or running a standard fan for <span className="text-theme-brand font-extrabold">{Math.round(loggedImpact.value * 24)}</span> hours.
+                Equivalent to charging <span className="text-theme-brand font-extrabold">{Math.round(activities[0].calculated_value * 120)}</span> smartphones, or running a standard fan for <span className="text-theme-brand font-extrabold">{Math.round(activities[0].calculated_value * 24)}</span> hours.
               </p>
             </div>
             <button 
-              onClick={() => setLoggedImpact(null)} 
+              onClick={() => setHideSuccess(true)} 
               className="text-theme-muted hover:text-theme-primary font-bold p-1 cursor-pointer transition-colors"
             >
               ✕
