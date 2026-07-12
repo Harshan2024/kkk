@@ -3,7 +3,7 @@
 # Next.js 14 Production Build (standalone output)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Stage 1: Dependencies
+# Stage 1: Dependencies — install all dependencies (including devDependencies)
 FROM node:20-alpine AS deps
 
 WORKDIR /app
@@ -14,8 +14,8 @@ RUN apk add --no-cache libc6-compat
 # Copy package manifests
 COPY package.json package-lock.json* ./
 
-# Install production dependencies
-RUN npm ci --only=production
+# Install all dependencies (production + development)
+RUN npm ci
 
 
 # Stage 2: Builder — compile Next.js app
@@ -32,6 +32,8 @@ COPY . .
 # Set build-time environment variables
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+ENV DOCKER_BUILD=true
+
 # Backend API URL for server-side requests in production
 ARG NEXT_PUBLIC_API_URL=http://backend:8001
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
@@ -57,7 +59,10 @@ ENV PORT=3000
 RUN addgroup --system --gid 1001 carbontracker \
     && adduser --system --uid 1001 carbontracker
 
-# Copy only what is needed for runtime
+# Copy package.json to runtime
+COPY --chown=carbontracker:carbontracker package.json ./
+
+# Copy build outputs and production node_modules from builder standalone output
 COPY --from=builder --chown=carbontracker:carbontracker /app/public ./public
 COPY --from=builder --chown=carbontracker:carbontracker /app/.next/standalone ./
 COPY --from=builder --chown=carbontracker:carbontracker /app/.next/static ./.next/static
