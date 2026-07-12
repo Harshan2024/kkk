@@ -48,6 +48,7 @@ RUN mkdir -p /app/static/avatars /app/logs \
 
 # Copy application source
 COPY --chown=carbontracker:carbontracker app/ ./app/
+
 # Do NOT copy .env files.
 # Render injects environment variables securely.
 

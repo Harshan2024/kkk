@@ -307,7 +307,7 @@ export default function ProfilePage() {
                     <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-emerald-500/35 bg-stone-900 shadow-lg flex items-center justify-center text-2xl font-black text-white relative">
                       {profile?.profile_picture ? (
                         <img 
-                          src={profile.profile_picture.startsWith("http") ? profile.profile_picture : `http://localhost:8001${profile.profile_picture}`} 
+                          src={profile.profile_picture.startsWith("http") ? profile.profile_picture : `${process.env.NEXT_PUBLIC_API_URL || "https://carbontracker-backend.onrender.com"}${profile.profile_picture}`} 
                           alt="Profile Avatar" 
                           className="w-full h-full object-cover" 
                         />

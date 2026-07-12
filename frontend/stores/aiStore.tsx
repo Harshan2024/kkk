@@ -954,7 +954,7 @@ export function AIStoreProvider({
     // Clear client-side TTL caches on startup
     cache.clear();
 
-    // Check if localhost server restarted
+    // Check if backend server restarted
     const restarted = await checkServerRestart(signal);
     if (restarted) {
       setLoading(false);

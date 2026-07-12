@@ -27,7 +27,7 @@ import {
   sanitizeChatMessages,
 } from "../utils/validators";
 
-const HOST = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+const HOST = process.env.NEXT_PUBLIC_API_URL || "https://carbontracker-backend.onrender.com";
 const BASE_URL = HOST.endsWith("/api/v1") ? HOST : `${HOST}/api/v1`;
 
 const DEFAULT_TIMEOUT_MS = 15_000;
