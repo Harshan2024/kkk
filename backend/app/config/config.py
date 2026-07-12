@@ -31,14 +31,12 @@ class Settings:
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
     
-    # CORS settings (supporting both localhost and 127.0.0.1 on ports 3000 and 3001)
+    # CORS settings (supporting local ports and production Vercel app)
     BACKEND_CORS_ORIGINS: list[str] = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-        "http://localhost:3002",
-        "http://127.0.0.1:3002",
+        origin.strip() for origin in os.getenv(
+            "CORS_ORIGINS",
+            "https://kkk-seven-omega.vercel.app,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002,http://localhost:3003,http://127.0.0.1:3003"
+        ).split(",") if origin.strip()
     ]
     
     # NLP Configuration

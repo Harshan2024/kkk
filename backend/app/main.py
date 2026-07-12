@@ -251,6 +251,8 @@ async def set_body(request: Request, body: bytes):
 
 @app.middleware("http")
 async def security_hardening_middleware(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
     # 1. Content Length Limit check (5MB max)
     content_length = request.headers.get("content-length")
     if content_length:
@@ -293,6 +295,8 @@ async def security_hardening_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
     import secrets
     req_id = f"REQ-{secrets.token_hex(3).upper()}"
     token = request_id_var.set(req_id)
@@ -305,6 +309,8 @@ async def request_id_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def request_timing_middleware(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
     import time
     import jwt
     from app.config.config import settings
@@ -346,6 +352,8 @@ async def request_timing_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def add_security_headers_middleware(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
     response = await call_next(request)
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -375,18 +383,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 # ─────────────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        # localhost variants
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://localhost:3003",
-        # 127.0.0.1 variants (browser treats these differently from localhost)
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002",
-        "http://127.0.0.1:3003",
-    ],
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
