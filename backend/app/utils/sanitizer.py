@@ -14,6 +14,8 @@ def sanitize_text(text: str) -> str:
     escaped = re.sub(r"(?i)javascript:", "", escaped)
     return escaped
 
+import urllib.parse
+
 def sanitize_filename(filename: str) -> str:
     """
     Sanitizes filenames to prevent path traversal attacks.
@@ -21,8 +23,14 @@ def sanitize_filename(filename: str) -> str:
     """
     if not isinstance(filename, str):
         return filename
-    # Extract only the base name
-    base = os.path.basename(filename)
+    # Remove null bytes first
+    filename = filename.replace("\x00", "")
+    # URL decode to handle encoded traversal patterns (e.g., %2f)
+    filename = urllib.parse.unquote(filename)
+    # Normalize Windows backslashes to Unix forward slashes
+    normalized = filename.replace("\\", "/")
+    # Extract only the base name (final component after last slash)
+    base = normalized.split("/")[-1]
     # Remove any character that is not alphanumeric, a dot, space, dash, or underscore
     cleaned = re.sub(r"[^a-zA-Z0-9._ -]", "", base)
     # Strip leading dots or multiple dots

@@ -53,28 +53,51 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
   
   const { logActivity, activities } = useAIStore();
 
+  // Diagnostic logging for component lifecycle and states
+  useEffect(() => {
+    console.log("[ActivityInput] activities array updated. Total count:", activities?.length);
+    if (activities && activities.length > 0) {
+      console.log("[ActivityInput] Latest activity in store:", activities[0]);
+    }
+  }, [activities]);
+
+  useEffect(() => {
+    console.log("[ActivityInput] hideSuccess state updated:", hideSuccess);
+  }, [hideSuccess]);
+
+  useEffect(() => {
+    console.log("[ActivityInput] activeTab state updated:", activeTab);
+  }, [activeTab]);
+
   // Debounced API call for real-time parsing preview
   useEffect(() => {
     if (!inputText.trim()) {
+      console.log("[ActivityInput] Input is empty, clearing parsing states.");
       setParseResult(null);
       setParsing(false);
       return;
     }
 
     setParsing(true);
+    console.log("[ActivityInput] Scheduling parse check for input:", inputText);
     const delayDebounceFn = setTimeout(async () => {
       try {
+        console.log("[ActivityInput] Calling api.parseActivity for preview:", inputText);
         const result = await api.parseActivity(inputText, region);
+        console.log("[ActivityInput] api.parseActivity success:", result);
         setParseResult(result);
       } catch (err) {
-        console.error("Typing parse preview error:", err);
+        console.error("[ActivityInput] Typing parse preview error:", err);
         setParseResult(null);
       } finally {
         setParsing(false);
       }
     }, 300);
 
-    return () => clearTimeout(delayDebounceFn);
+    return () => {
+      console.log("[ActivityInput] Cleaning up typing debounce timer");
+      clearTimeout(delayDebounceFn);
+    };
   }, [inputText, region]);
 
   // Handle global voice logging trigger
@@ -89,18 +112,24 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim() || logging) return;
+    if (!inputText.trim() || logging) {
+      console.log("[ActivityInput] Submit aborted: empty input or currently logging.");
+      return;
+    }
 
     setLogging(true);
+    console.log("[ActivityInput] Submitting logActivity request for:", inputText);
     try {
       await logActivity(inputText, region);
+      console.log("[ActivityInput] logActivity completed successfully. Resetting input & parseResult states.");
       setInputText("");
       setParseResult(null);
       setHideSuccess(false);
     } catch (err: any) {
-      console.error(err);
+      console.error("[ActivityInput] Error logging activity to database:", err);
     } finally {
       setLogging(false);
+      console.log("[ActivityInput] Submit state logging set to false.");
     }
   };
 
@@ -217,7 +246,10 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
           <form onSubmit={handleSubmit} className="relative mt-2">
             <textarea
               value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
+              onChange={(e) => {
+                console.log("[ActivityInput] User input text updated:", e.target.value);
+                setInputText(e.target.value);
+              }}
               placeholder={isRecording ? "Listening to dictation stream..." : "Describe activity: 'drove 8 km in car', 'ate vegan lunch', 'AC for 2 hours'..."}
               disabled={isRecording}
               rows={2}
@@ -445,31 +477,93 @@ export default function ActivityInput({ onActivityLogged, region }: ActivityInpu
 
       {/* Comparison Success Box */}
       <AnimatePresence>
-        {activities && activities.length > 0 && !hideSuccess && (
+        {activities && activities.length > 0 && !inputText.trim() && !hideSuccess && (
           <motion.div 
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 12 }}
-            className="mt-4 p-4.5 rounded-2xl bg-emerald-950/20 border border-emerald-500/20 text-theme-brand text-xs flex items-center justify-between"
+            className="mt-4 glass-premium rounded-2xl p-5 overflow-hidden select-none border border-emerald-500/25"
           >
-            <div>
-              <h5 className="font-extrabold uppercase text-[9px] tracking-widest text-theme-brand mb-1 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-theme-brand animate-pulse" />
-                Logged successfully to database
-              </h5>
-              <p className="font-bold text-theme-secondary">
-                Generated <span className="text-theme-primary font-extrabold">{activities[0].calculated_value.toFixed(2)} kg CO₂</span> for <span className="capitalize text-theme-primary">"{activities[0].item || activities[0].input_text}"</span>.
-              </p>
-              <p className="text-[10px] text-theme-muted mt-1 leading-normal font-bold">
-                Equivalent to charging <span className="text-theme-brand font-extrabold">{Math.round(activities[0].calculated_value * 120)}</span> smartphones, or running a standard fan for <span className="text-theme-brand font-extrabold">{Math.round(activities[0].calculated_value * 24)}</span> hours.
-              </p>
+            <div className="flex items-center justify-between mb-3 border-b border-white/5 pb-2">
+              <div className="flex items-center space-x-2">
+                <Sparkles className="w-3.5 h-3.5 text-theme-brand animate-pulse" />
+                <span className="text-xs font-black text-theme-primary uppercase tracking-widest">
+                  Logged successfully to database
+                </span>
+              </div>
+              <button 
+                onClick={() => {
+                  console.log("[ActivityInput] Manually closed success card");
+                  setHideSuccess(true);
+                }} 
+                className="text-theme-muted hover:text-theme-primary font-bold p-1 cursor-pointer transition-colors"
+              >
+                ✕
+              </button>
             </div>
-            <button 
-              onClick={() => setHideSuccess(true)} 
-              className="text-theme-muted hover:text-theme-primary font-bold p-1 cursor-pointer transition-colors"
-            >
-              ✕
-            </button>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {/* Parsed Entities */}
+              <div className="space-y-1.5 font-bold text-xs">
+                <span className="text-[9px] uppercase font-black tracking-widest text-theme-muted">
+                  Entities
+                </span>
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-theme-muted">Activity:</span>
+                    <span className="text-theme-primary capitalize truncate max-w-[120px]">{activities[0].item}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-theme-muted">Category:</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] border capitalize leading-none font-bold ${getCategoryColor(activities[0].category)}`}>
+                      {activities[0].category ?? "Unknown"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-theme-muted">Original Input:</span>
+                    <span className="text-theme-secondary truncate max-w-[120px]" title={activities[0].input_text}>
+                      "{activities[0].input_text}"
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Formula Transparency */}
+              <div className="space-y-1.5 font-bold text-xs">
+                <span className="text-[9px] uppercase font-black tracking-widest text-theme-muted">
+                  Formula
+                </span>
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-theme-muted">Quantity:</span>
+                    <span className="text-theme-primary">{activities[0].quantity} {activities[0].unit}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-theme-muted">Factor:</span>
+                    <span className="text-theme-secondary">{getFactor({ metadata: activities[0].metadata })}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-theme-muted">Formula:</span>
+                    <span className="text-theme-secondary">{getFormula({ metadata: activities[0].metadata, parsed: { quantity: activities[0].quantity } })}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Emissions Result Box */}
+              <div className="rounded-xl bg-emerald-500/5 border border-emerald-555/10 p-3 flex flex-col justify-between items-center text-center">
+                <div>
+                  <span className="text-[9px] text-theme-brand font-extrabold uppercase tracking-widest block mb-0.5">
+                    Carbon Emissions
+                  </span>
+                  <div className="text-xl font-black text-theme-primary font-sans">
+                    {activities[0].calculated_value.toFixed(2)} <span className="text-[10px] text-theme-muted uppercase">kg CO₂</span>
+                  </div>
+                </div>
+                <div className="text-[9px] text-theme-muted mt-1 leading-normal font-bold">
+                  Equivalent: {Math.round(activities[0].calculated_value * 120)} phone charges
+                </div>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
