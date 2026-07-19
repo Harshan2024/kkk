@@ -4,7 +4,7 @@ from app.models import EmissionFactor
 from app.emissions.factors import FOOD_UNIT_TO_KG, DEFAULT_EMISSION_FACTORS
 
 from app.carbon.transport_factors import TRANSPORT_FACTORS
-from app.carbon.transport_formula import calculate_transport_co2
+from app.carbon.transport_formula import calculate_transport_co2, format_formula
 from app.carbon.food_factors import FOOD_FACTORS
 from app.carbon.food_formula import calculate_food_co2
 from app.carbon.appliance_factors import APPLIANCE_WATTS, GRID_FACTORS
@@ -337,7 +337,11 @@ def calculate_food_emission(db: Session, item: str, quantity: float, unit: str, 
         "calculation_type": "weight_based",
         "mapped_item": item_mapped,
         "estimated_weight_kg": round(weight_kg, 3),
-        "emission_factor":def calculate_transport_emission(db: Session, vehicle: str, distance: float, unit: str, region: str = "Global") -> Tuple[float, Dict[str, Any]]:
+        "emission_factor": factor_val,
+    }
+    return emissions, metadata
+
+def calculate_transport_emission(db: Session, vehicle: str, distance: float, unit: str, region: str = "Global") -> Tuple[float, Dict[str, Any]]:
     """
     Calculates carbon emissions for transport.
     Formula: distance (km) * factor (kgCO2e/km)
@@ -461,13 +465,17 @@ def calculate_food_emission(db: Session, item: str, quantity: float, unit: str, 
     co2_val = formula_res["co2"]
     formula_str = format_formula(distance_km, factor_val)
 
+    returned_vehicle_mapped = vehicle_key
+    if "_" in vehicle:
+        returned_vehicle_mapped = vehicle_key.replace(" ", "_")
+
     metadata = {
         "co2": co2_val,
         "factor": factor_val,
         "source": source_val,
         "method": "formula",
         "distance_km": round(distance_km, 2),
-        "vehicle_mapped": vehicle_key,
+        "vehicle_mapped": returned_vehicle_mapped,
         "emission_factor": factor_val,
         # Required Output fields
         "Vehicle Type": display_vehicle,
