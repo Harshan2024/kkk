@@ -27,7 +27,7 @@ import {
   sanitizeChatMessages,
 } from "../utils/validators";
 
-const HOST = process.env.NEXT_PUBLIC_API_URL || "https://carbontracker-backend.onrender.com";
+const HOST = process.env.NEXT_PUBLIC_API_URL || "https://kkk-harshan-sona.onrender.com";
 const BASE_URL = HOST.endsWith("/api/v1") ? HOST : `${HOST}/api/v1`;
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -583,18 +583,12 @@ async function fetchWithTimeout(
     const duration = Math.round(performance.now() - startTime);
     if (err instanceof Error && err.name === "AbortError") {
       logger.warn("API", `[TIMEOUT] ${endpoint} — aborted after ${duration}ms (limit: ${timeoutMs}ms)`);
-      console.error(`[CarbonTracker API] TIMEOUT: ${url} after ${duration}ms`);
-      throw new Error(`Connection timeout after ${timeoutMs / 1000}s. Please check the backend is running on port 8000.`);
+      // Production-safe timeout message — no localhost or port references
+      throw new Error(`Connection timed out after ${timeoutMs / 1000}s. The backend may be starting up — please try again in a moment.`);
     }
     logger.error("API", `[FAIL] ${endpoint} — network error after ${duration}ms`, err);
-    console.error(`[CarbonTracker API] NETWORK ERROR: ${url}`, err);
-    // Provide a clear actionable message instead of raw "Failed to fetch"
-    const isDev = process.env.NODE_ENV !== "production";
-    throw new Error(
-      isDev
-        ? `Backend unavailable at ${url}. Ensure the backend is running: cd backend && .venv\\Scripts\\python -m uvicorn app.main:app --port 8000`
-        : "Backend server unavailable. Please try again in a moment."
-    );
+    // Production-safe network error — never expose internal URLs or dev commands
+    throw new Error("Backend server unavailable. Please check your connection and try again.");
   }
 }
 

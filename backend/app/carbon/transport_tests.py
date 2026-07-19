@@ -82,6 +82,59 @@ def run_tests():
     check("error", res_miss.get("error"), "distance_required")
     check("message", res_miss.get("message"), "Please specify the travel distance in kilometers.")
 
+    # Context-Aware Two-Wheeler Ambiguity Tests
+    print("\nTest 9: 'I travelled 5 km in a petrol bike.'")
+    res9 = calculate_transport_from_text("I travelled 5 km in a petrol bike.")
+    check("vehicle", res9.get("vehicle"), "Petrol Motorcycle")
+    check("Vehicle Type", res9.get("Vehicle Type"), "Petrol Motorcycle")
+    check("Fuel Type", res9.get("Fuel Type"), "Petrol")
+    check("co2", res9.get("co2"), 0.52)
+    check("formula", res9.get("formula"), "5 × 0.103")
+
+    print("\nTest 10: 'I rode my bike with a helmet for 10 km'")
+    res10 = calculate_transport_from_text("I rode my bike with a helmet for 10 km")
+    check("vehicle", res10.get("vehicle"), "Motorcycle")
+    check("Vehicle Type", res10.get("Vehicle Type"), "Motorcycle")
+    check("Fuel Type", res10.get("Fuel Type"), "Petrol")
+    check("co2", res10.get("co2"), 1.03)
+
+    print("\nTest 11: 'I rode my bike with pedals for 12 km'")
+    res11 = calculate_transport_from_text("I rode my bike with pedals for 12 km")
+    check("vehicle", res11.get("vehicle"), "Bicycle")
+    check("Vehicle Type", res11.get("Vehicle Type"), "Bicycle")
+    check("Fuel Type", res11.get("Fuel Type"), "None")
+    check("co2", res11.get("co2"), 0.0)
+
+    print("\nTest 12: 'I rode a honda for 15 km'")
+    res12 = calculate_transport_from_text("I rode a honda for 15 km")
+    check("vehicle", res12.get("vehicle"), "Motorcycle")
+    check("Vehicle Type", res12.get("Vehicle Type"), "Motorcycle")
+    check("Fuel Type", res12.get("Fuel Type"), "Petrol")
+    check("co2", res12.get("co2"), 1.55)
+
+    print("\nTest 13: 'I rode an electric bike for 6 km'")
+    res13 = calculate_transport_from_text("I rode an electric bike for 6 km")
+    check("vehicle", res13.get("vehicle"), "Electric Bike")
+    check("Vehicle Type", res13.get("Vehicle Type"), "Electric Bike")
+    check("Fuel Type", res13.get("Fuel Type"), "Electric")
+    check("co2", res13.get("co2"), 0.12)
+
+    print("\nTest 14: 'I rode my bike with engine for 20 km'")
+    res14 = calculate_transport_from_text("I rode my bike with engine for 20 km")
+    check("vehicle", res14.get("vehicle"), "Motorcycle")
+
+    print("\nTest 15: 'I rode my bike riding for 25 km'")
+    res15 = calculate_transport_from_text("I rode my bike riding for 25 km")
+    check("vehicle", res15.get("vehicle"), "Motorcycle")
+
+    print("\nTest 16: 'I rode my bike to go cycling 4 km'")
+    res16 = calculate_transport_from_text("I rode my bike to go cycling 4 km")
+    check("vehicle", res16.get("vehicle"), "Bicycle")
+
+    print("\nTest 17: 'I rode my bike on fuel for 30 km'")
+    res17 = calculate_transport_from_text("I rode my bike on fuel for 30 km")
+    check("vehicle", res17.get("vehicle"), "Petrol Motorcycle")
+
     # Performance & Latency Check
     print("\n=== Performance Latency Benchmarking (100 runs) ===")
     t_start = time.perf_counter()

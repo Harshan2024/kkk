@@ -22,7 +22,7 @@
 
 import type { SystemHealth } from "./api";
 
-const HOST = process.env.NEXT_PUBLIC_API_URL || "https://carbontracker-backend.onrender.com";
+const HOST = process.env.NEXT_PUBLIC_API_URL || "https://kkk-harshan-sona.onrender.com";
 const POLL_INTERVAL_MS = 45_000;
 const PROBE_TIMEOUT_MS = 10_000;
 

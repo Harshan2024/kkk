@@ -18,7 +18,7 @@ def calculate_transport_carbon(vehicle: str, distance: float) -> dict:
       "formula": str
     } or {"error": "unknown_transport_mode"}
     """
-    v_lower = vehicle.lower().strip()
+    v_lower = vehicle.lower().strip().replace("_", " ")
     
     # Flight resolution rule: if distance < 2000 km, use domestic flight factor, else international
     if v_lower == "flight":
@@ -47,12 +47,52 @@ def calculate_transport_carbon(vehicle: str, distance: float) -> dict:
                 display_vehicle = k.title()
                 break
                 
+    # Determine Vehicle Type and Fuel Type using our context-aware logic
+    from app.nlp.transport_entities import resolve_two_wheeler_context
+    two_wheeler = resolve_two_wheeler_context(display_vehicle)
+    if two_wheeler:
+        vehicle_type = two_wheeler["vehicle_type"]
+        fuel_type = two_wheeler["fuel_type"]
+        display_vehicle = two_wheeler["vehicle"]
+    else:
+        v_clean = display_vehicle.lower()
+        if "car" in v_clean:
+            vehicle_type = "Car"
+            if "electric" in v_clean or "ev" in v_clean:
+                fuel_type = "Electric"
+            elif "diesel" in v_clean:
+                fuel_type = "Diesel"
+            elif "hybrid" in v_clean:
+                fuel_type = "Hybrid"
+            elif "cng" in v_clean:
+                fuel_type = "CNG"
+            else:
+                fuel_type = "Petrol"
+        elif "train" in v_clean or "rail" in v_clean or "metro" in v_clean or "subway" in v_clean:
+            vehicle_type = "Train"
+            fuel_type = "Electric" if "electric" in v_clean or "metro" in v_clean or "subway" in v_clean else "Diesel"
+        elif "bus" in v_clean:
+            vehicle_type = "Bus"
+            fuel_type = "Electric" if "electric" in v_clean else "Diesel"
+        elif "flight" in v_clean or "plane" in v_clean:
+            vehicle_type = "Aviation"
+            fuel_type = "Aviation Fuel"
+        else:
+            vehicle_type = display_vehicle.title()
+            fuel_type = "Unknown"
+
     return {
         "vehicle": display_vehicle,
         "distance": distance,
         "factor": factor,
         "co2": co2,
-        "formula": formula
+        "formula": formula,
+        "Vehicle Type": display_vehicle,
+        "Fuel Type": fuel_type,
+        "Emission Factor": factor,
+        "Distance": distance,
+        "Carbon Formula": formula,
+        "CO₂ Result": co2
     }
 
 def calculate_transport_from_text(text: str) -> dict:

@@ -48,9 +48,10 @@ import {
   saveRefreshToken,
   saveLoginTimestamp,
   isAuthenticated as checkAuthLocal,
+  initSession,
 } from "../services/authService";
 import { healthMonitor } from "../services/healthMonitor";
-import { cache } from "../services/cache";
+import { cache, CACHE_KEYS } from "../services/cache";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONTEXT SHAPE
@@ -304,6 +305,9 @@ export function AIStoreProvider({
   const prevDbStatusRef = useRef<string | null>(null);
   // Stable ref to logout to avoid forward-reference in useCallback deps
   const logoutRef = useRef<() => void>(() => {});
+  // Set to true after a successful login() call; prevents startup() from
+  // overwriting freshly-set auth state when the provider remounts after navigation.
+  const hasLoggedInRef = useRef(false);
 
   // Request deduplication refs
   const isDashboardLoadingRef = useRef(false);
@@ -836,29 +840,43 @@ export function AIStoreProvider({
       const tokenData = await api.login(email, password);
       if (tokenData && tokenData.access_token) {
         logger.info("aiStore", "[DEBUG] login → access_token received, saving to storage");
+
+        // 1. Persist tokens FIRST — synchronously before any state update
         saveToken(tokenData.access_token);
-        // Save refresh token if provided by backend
         if (tokenData.refresh_token) {
           saveRefreshToken(tokenData.refresh_token);
           logger.info("aiStore", "[DEBUG] login → refresh_token saved");
         }
         saveLoginTimestamp();
+
+        // 2. Mark that a fresh login just occurred so startup() skips re-init
+        hasLoggedInRef.current = true;
+
+        // 3. Update React auth state
         setToken(tokenData.access_token);
         setIsAuthenticated(true);
-        // Load profile immediately after token is saved
+
+        // 4. Invalidate any stale profile cache, then load fresh profile
+        cache.invalidate(CACHE_KEYS.PROFILE);
         logger.info("aiStore", "[DEBUG] login → calling getProfile to hydrate user state");
         const profile = await api.getProfile();
         saveUser(profile);
         setUser(profile);
         logger.info("aiStore", `[DEBUG] login → profile loaded for: ${profile.username}`);
+
+        // 5. Mark startup as ready so the dashboard doesn't re-run the init flow
+        setStartupPhase("ready");
+        setLoading(false);
+
         return true;
       }
       logger.warn("aiStore", "[DEBUG] login → no access_token in tokenData response");
       return false;
     } catch (err: any) {
       logger.error("aiStore", "Login failed", err);
-      setToastError(err?.message || "Login failed");
-      return false;
+      // Do NOT call setToastError here: the login page handles its own error display.
+      // Throwing allows the login page to show the specific 401 message.
+      throw err;
     }
   }, []);
 
@@ -939,6 +957,14 @@ export function AIStoreProvider({
 
   // Centralized deterministic startup sequence
   const startup = useCallback(async () => {
+    // If the user just completed a fresh login() in this session, the auth state
+    // is already fully hydrated. Skip the heavy re-initialization to avoid
+    // overwriting isAuthenticated=true or triggering a premature logout.
+    if (hasLoggedInRef.current) {
+      logger.info("aiStore", "[DEBUG] startup → skipping re-init (fresh login already completed)");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setStartupPhase("init");
@@ -1148,6 +1174,13 @@ export function AIStoreProvider({
     setLoading(false);
     setStartupPhase("ready");
   }, [fetchChatHistory, classifyError]);
+
+  // Call initSession() once on mount to safely clear stale localStorage tokens
+  // from previous non-session-storage browsers. This replaces the old module-level
+  // side-effect that was the root cause of the first-login race condition.
+  useEffect(() => {
+    initSession();
+  }, []);
 
   // Critical startup load on mount
   useEffect(() => {

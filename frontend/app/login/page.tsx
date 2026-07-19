@@ -52,16 +52,24 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const success = await login(email, password);
-      setLoading(false);
-      if (success) {
-        router.push("/");
-      } else {
-        setError("Invalid email or password");
-      }
+      // login() now throws on any failure (network, wrong password, etc.)
+      // It returns true on success. No silent "return false" path exists.
+      await login(email, password);
+      // Token is fully persisted and auth state is set before we reach here.
+      router.push("/");
     } catch (err: any) {
       setLoading(false);
-      setError(err?.message || "Failed to sign in. Please verify your credentials.");
+      // Extract the most user-friendly message from the error chain
+      const msg: string = err?.message || "";
+      if (msg.includes("401") || msg.toLowerCase().includes("invalid email or password") || msg.toLowerCase().includes("credentials")) {
+        setError("Invalid email or password. Please try again.");
+      } else if (msg.toLowerCase().includes("inactive")) {
+        setError("Your account is inactive. Please contact support.");
+      } else if (msg.toLowerCase().includes("timeout") || msg.toLowerCase().includes("backend unavailable") || msg.toLowerCase().includes("failed to fetch")) {
+        setError("Unable to reach the server. Please check your connection and try again.");
+      } else {
+        setError(msg || "Sign in failed. Please verify your credentials.");
+      }
     }
   };
 

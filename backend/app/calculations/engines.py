@@ -337,11 +337,7 @@ def calculate_food_emission(db: Session, item: str, quantity: float, unit: str, 
         "calculation_type": "weight_based",
         "mapped_item": item_mapped,
         "estimated_weight_kg": round(weight_kg, 3),
-        "emission_factor": factor_val,
-    }
-    return emissions, metadata
-
-def calculate_transport_emission(db: Session, vehicle: str, distance: float, unit: str, region: str = "Global") -> Tuple[float, Dict[str, Any]]:
+        "emission_factor":def calculate_transport_emission(db: Session, vehicle: str, distance: float, unit: str, region: str = "Global") -> Tuple[float, Dict[str, Any]]:
     """
     Calculates carbon emissions for transport.
     Formula: distance (km) * factor (kgCO2e/km)
@@ -354,149 +350,134 @@ def calculate_transport_emission(db: Session, vehicle: str, distance: float, uni
     if unit_clean in ["mile", "miles", "mi"]:
         distance_km = distance * 1.60934
 
-    # Resolve vehicle key using existing rules:
-    vehicle_key = vehicle_clean
-    if vehicle_clean in TRANSPORT_FACTORS:
-        vehicle_key = vehicle_clean
+    # Resolve using context-aware matcher if it's a two-wheeler/bike/cycle
+    from app.nlp.transport_entities import resolve_two_wheeler_context
+    two_wheeler = resolve_two_wheeler_context(vehicle)
+    
+    if two_wheeler:
+        vehicle_key = two_wheeler["item_key"]
+        factor_val = two_wheeler["factor"]
+        source_val = two_wheeler["source"]
+        display_vehicle = two_wheeler["vehicle"]
+        vehicle_type = two_wheeler["vehicle_type"]
+        fuel_type = two_wheeler["fuel_type"]
     else:
-        # Apply mapping rules
-        if "car" in vehicle_clean:
-            if "diesel" in vehicle_clean:
-                vehicle_key = "diesel_car"
-            elif "ev" in vehicle_clean or "electric" in vehicle_clean:
-                vehicle_key = "electric_car"
-            elif "hybrid" in vehicle_clean:
-                vehicle_key = "hybrid_car"
-            elif "cng" in vehicle_clean:
-                vehicle_key = "cng_car"
-            else:
-                vehicle_key = "petrol_car"
-        elif "train" in vehicle_clean or "rail" in vehicle_clean:
-            if "electric" in vehicle_clean:
-                vehicle_key = "electric_train"
-            else:
-                vehicle_key = "train"
-        elif "metro" in vehicle_clean or "subway" in vehicle_clean or "tube" in vehicle_clean:
-            vehicle_key = "metro"
-        elif "bus" in vehicle_clean:
-            if "electric" in vehicle_clean:
-                vehicle_key = "electric_bus"
-            else:
-                vehicle_key = "bus"
-        elif "flight" in vehicle_clean or "plane" in vehicle_clean or "flying" in vehicle_clean:
-            vehicle_key = "flight"
-        elif "bike" in vehicle_clean or "motorcycle" in vehicle_clean or "scooter" in vehicle_clean:
-            if "electric" in vehicle_clean:
-                if "scooter" in vehicle_clean:
-                    vehicle_key = "electric_scooter"
+        # Fallback to standard vehicle mapping rules
+        vehicle_key = vehicle_clean
+        if vehicle_clean in TRANSPORT_FACTORS:
+            vehicle_key = vehicle_clean
+        else:
+            if "car" in vehicle_clean:
+                if "diesel" in vehicle_clean:
+                    vehicle_key = "diesel_car"
+                elif "ev" in vehicle_clean or "electric" in vehicle_clean:
+                    vehicle_key = "electric_car"
+                elif "hybrid" in vehicle_clean:
+                    vehicle_key = "hybrid_car"
+                elif "cng" in vehicle_clean:
+                    vehicle_key = "cng_car"
                 else:
-                    vehicle_key = "electric_bike"
-            else:
-                vehicle_key = "bike"
-        elif "rickshaw" in vehicle_clean or "auto" in vehicle_clean:
-            vehicle_key = "auto_rickshaw"
-        elif "walk" in vehicle_clean or "cycle" in vehicle_clean or "bicycle" in vehicle_clean:
-            vehicle_key = "walking"
+                    vehicle_key = "petrol_car"
+            elif "train" in vehicle_clean or "rail" in vehicle_clean:
+                if "electric" in vehicle_clean:
+                    vehicle_key = "electric_train"
+                else:
+                    vehicle_key = "train"
+            elif "metro" in vehicle_clean or "subway" in vehicle_clean or "tube" in vehicle_clean:
+                vehicle_key = "metro"
+            elif "bus" in vehicle_clean:
+                if "electric" in vehicle_clean:
+                    vehicle_key = "electric_bus"
+                else:
+                    vehicle_key = "bus"
+            elif "flight" in vehicle_clean or "plane" in vehicle_clean or "flying" in vehicle_clean:
+                vehicle_key = "flight"
+            elif "bike" in vehicle_clean or "motorcycle" in vehicle_clean or "scooter" in vehicle_clean:
+                if "electric" in vehicle_clean:
+                    if "scooter" in vehicle_clean:
+                        vehicle_key = "electric_scooter"
+                    else:
+                        vehicle_key = "electric_bike"
+                else:
+                    vehicle_key = "bike"
+            elif "rickshaw" in vehicle_clean or "auto" in vehicle_clean:
+                vehicle_key = "auto_rickshaw"
+            elif "walk" in vehicle_clean or "cycle" in vehicle_clean or "bicycle" in vehicle_clean:
+                vehicle_key = "walking"
 
-    # Try matching using transport_formula and TRANSPORT_FACTORS
+        # Resolve display_vehicle, vehicle_type, fuel_type for cars, trains, etc.
+        v_clean = vehicle_key.replace("_", " ")
+        if "car" in v_clean:
+            vehicle_type = "Car"
+            if "electric" in v_clean or "ev" in v_clean:
+                fuel_type = "Electric"
+                display_vehicle = "Electric Car"
+            elif "diesel" in v_clean:
+                fuel_type = "Diesel"
+                display_vehicle = "Diesel Car"
+            elif "hybrid" in v_clean:
+                fuel_type = "Hybrid"
+                display_vehicle = "Hybrid Car"
+            elif "cng" in v_clean:
+                fuel_type = "CNG"
+                display_vehicle = "CNG Car"
+            else:
+                fuel_type = "Petrol"
+                display_vehicle = "Petrol Car"
+        elif "train" in v_clean or "rail" in v_clean or "metro" in v_clean or "subway" in v_clean:
+            vehicle_type = "Train"
+            fuel_type = "Electric" if "electric" in v_clean or "metro" in v_clean or "subway" in v_clean else "Diesel"
+            display_vehicle = v_clean.title()
+        elif "bus" in v_clean:
+            vehicle_type = "Bus"
+            fuel_type = "Electric" if "electric" in v_clean else "Diesel"
+            display_vehicle = v_clean.title()
+        elif "flight" in v_clean or "plane" in v_clean:
+            vehicle_type = "Aviation"
+            fuel_type = "Aviation Fuel"
+            display_vehicle = v_clean.title()
+        else:
+            vehicle_type = v_clean.title()
+            fuel_type = "Unknown"
+            display_vehicle = v_clean.title()
+
+    # Look up in TRANSPORT_FACTORS if available
     lookup_key = vehicle_key.replace("_", " ")
     if lookup_key in TRANSPORT_FACTORS:
         factor_info = TRANSPORT_FACTORS[lookup_key]
         factor_val = factor_info["factor"]
         source_val = factor_info["source"]
-        
-        formula_res = calculate_transport_co2(distance_km, factor_val, source_val)
-        
-        metadata = {
-            "co2": formula_res["co2"],
-            "factor": formula_res["factor"],
-            "source": formula_res["source"],
-            "method": "formula",
-            # legacy keys:
-            "distance_km": round(distance_km, 2),
-            "vehicle_mapped": vehicle_key,
-            "emission_factor": factor_val
-        }
-        return formula_res["co2"], metadata
-
-    # Find matching factor (fallback)
-    factor_record = get_factor_first(db, category="transport", item_key=vehicle_clean, region=region)
-    
-    # Fallback to general vehicle if no exact match
-    if not factor_record:
-        if "car" in vehicle_clean:
-            if "diesel" in vehicle_clean:
-                factor_record = get_factor_first(db, category="transport", item_key="diesel_car", region=region)
-                if not factor_record:
-                    factor_record = get_factor_first(db, category="transport", item_key="diesel car", region=region)
-            elif "ev" in vehicle_clean or "electric" in vehicle_clean:
-                factor_record = get_factor_first(db, category="transport", item_key="electric_car", region=region)
-                if not factor_record:
-                    factor_record = get_factor_first(db, category="transport", item_key="ev", region=region)
-            elif "hybrid" in vehicle_clean:
-                factor_record = get_factor_first(db, category="transport", item_key="hybrid_car", region=region)
-            elif "cng" in vehicle_clean:
-                factor_record = get_factor_first(db, category="transport", item_key="cng_car", region=region)
-            else:
-                factor_record = get_factor_first(db, category="transport", item_key="petrol_car", region=region)
-                if not factor_record:
-                    factor_record = get_factor_first(db, category="transport", item_key="petrol car", region=region)
-        elif "train" in vehicle_clean or "rail" in vehicle_clean:
-            if "electric" in vehicle_clean:
-                factor_record = get_factor_first(db, category="transport", item_key="electric_train", region=region)
-            if not factor_record:
-                factor_record = get_factor_first(db, category="transport", item_key="train", region=region)
-        elif "metro" in vehicle_clean or "subway" in vehicle_clean or "tube" in vehicle_clean:
-            factor_record = get_factor_first(db, category="transport", item_key="metro", region=region)
-        elif "bus" in vehicle_clean:
-            if "electric" in vehicle_clean:
-                factor_record = get_factor_first(db, category="transport", item_key="electric_bus", region=region)
-            if not factor_record:
-                factor_record = get_factor_first(db, category="transport", item_key="bus", region=region)
-        elif "flight" in vehicle_clean or "plane" in vehicle_clean or "flying" in vehicle_clean:
-            factor_record = get_factor_first(db, category="transport", item_key="flight", region=region)
-        elif "bike" in vehicle_clean or "motorcycle" in vehicle_clean or "scooter" in vehicle_clean:
-            if "electric" in vehicle_clean:
-                if "scooter" in vehicle_clean:
-                    factor_record = get_factor_first(db, category="transport", item_key="electric_scooter", region=region)
-                else:
-                    factor_record = get_factor_first(db, category="transport", item_key="electric_bike", region=region)
-            if not factor_record:
-                factor_record = get_factor_first(db, category="transport", item_key="bike", region=region)
-        elif "rickshaw" in vehicle_clean or "auto" in vehicle_clean:
-            factor_record = get_factor_first(db, category="transport", item_key="auto_rickshaw", region=region)
-        elif "walk" in vehicle_clean or "cycle" in vehicle_clean or "bicycle" in vehicle_clean:
-            factor_record = get_factor_first(db, category="transport", item_key="walking", region=region)
-            
-    if not factor_record:
-        factor_val = 0.0
-        vehicle_mapped = "unknown_transport_mode"
-        source_val = "CarbonTracker Standard"
     else:
-        factor_val = factor_record.factor
-        vehicle_mapped = factor_record.item_key
-        source_val = factor_record.source
-    
-    # Print debug logging output
-    print(f"Detected Entity:\n{vehicle}")
-    print(f"Normalized Entity:\n{vehicle_clean}")
-    print(f"Factor Key Used:\n{vehicle_mapped}")
-    print(f"Factor Key:\n{vehicle_mapped}")
-    print(f"Retrieved Factor:\n{factor_val:.3f}")
-    print(f"Factor Retrieved:\n{factor_val:.3f}")
+        # DB lookup fallback
+        factor_record = get_factor_first(db, category="transport", item_key=vehicle_key, region=region)
+        if factor_record:
+            factor_val = factor_record.factor
+            source_val = factor_record.source
+        else:
+            factor_val = 0.192 if "car" in vehicle_key else 0.0
+            source_val = "Estimated"
 
-    import logging
-    logger = logging.getLogger("carbontracker.calculations")
-    logger.info(f"Detected Entity: {vehicle} | Normalized Entity: {vehicle_clean} | Factor Key: {vehicle_mapped} | Factor Retrieved: {factor_val}")
+    formula_res = calculate_transport_co2(distance_km, factor_val, source_val)
+    co2_val = formula_res["co2"]
+    formula_str = format_formula(distance_km, factor_val)
 
-    emissions = distance_km * factor_val
     metadata = {
+        "co2": co2_val,
+        "factor": factor_val,
+        "source": source_val,
+        "method": "formula",
         "distance_km": round(distance_km, 2),
-        "vehicle_mapped": vehicle_mapped,
+        "vehicle_mapped": vehicle_key,
         "emission_factor": factor_val,
-        "source": factor_record.source if factor_record else "estimated"
+        # Required Output fields
+        "Vehicle Type": display_vehicle,
+        "Fuel Type": fuel_type,
+        "Emission Factor": factor_val,
+        "Distance": distance_km,
+        "Carbon Formula": formula_str,
+        "CO₂ Result": co2_val
     }
-    return emissions, metadata
+    return co2_val, metadata
 
 def calculate_appliance_emission(db: Session, appliance: str, duration_hours: float, quantity: float = 1.0, region: str = "Global") -> Tuple[float, Dict[str, Any]]:
     """

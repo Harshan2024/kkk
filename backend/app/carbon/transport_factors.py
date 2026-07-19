@@ -23,13 +23,18 @@ TRANSPORT_FACTORS = {
     "ev":                   {"factor": 0.053, "source": "CarbonTracker Standard"},
 
     # Two-wheelers
+    "petrol motorcycle":    {"factor": 0.103, "source": "CarbonTracker Standard"},
+    "petrol bike":          {"factor": 0.103, "source": "CarbonTracker Standard"},
+    "motor bike":           {"factor": 0.103, "source": "CarbonTracker Standard"},
     "motorcycle":           {"factor": 0.103, "source": "CarbonTracker Standard"},
     "bike":                 {"factor": 0.103, "source": "CarbonTracker Standard"},
+    "scooter":              {"factor": 0.075, "source": "CarbonTracker Standard"},
     "petrol scooter":       {"factor": 0.075, "source": "CarbonTracker Standard"},
     "electric scooter":     {"factor": 0.015, "source": "CarbonTracker Standard"},
     "electric_scooter":     {"factor": 0.015, "source": "CarbonTracker Standard"},
     "electric bike":        {"factor": 0.020, "source": "CarbonTracker Standard"},
     "electric_bike":        {"factor": 0.020, "source": "CarbonTracker Standard"},
+    "cycle":                {"factor": 0.000, "source": "CarbonTracker Standard"},
 
     # Three-wheelers / taxis
     "auto rickshaw":        {"factor": 0.090, "source": "CarbonTracker Standard"},

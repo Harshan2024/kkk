@@ -142,7 +142,7 @@ export default function ActivityHistory({}: ActivityHistoryProps) {
 
   const handleExport = async (format: "json" | "csv") => {
     try {
-      const url = `${process.env.NEXT_PUBLIC_API_URL || "https://carbontracker-backend.onrender.com"}/api/v1/history/export?format=${format}`;
+      const url = `${process.env.NEXT_PUBLIC_API_URL || "https://kkk-harshan-sona.onrender.com"}/api/v1/history/export?format=${format}`;
       window.open(url, "_blank");
     } catch (err) {
       alert("Failed to export history: " + err);

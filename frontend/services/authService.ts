@@ -167,31 +167,27 @@ export function getSessionAgeMinutes(): number | null {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STARTUP CHECK — Clear legacy localStorage tokens if session is not active
+// SESSION INITIALIZATION
 // ─────────────────────────────────────────────────────────────────────────────
-if (typeof window !== "undefined" && typeof window.sessionStorage !== "undefined") {
+// IMPORTANT: This is an EXPLICIT function — NOT module-level side-effect code.
+// The old module-level storage clearing caused a race condition: it ran on every
+// module import/re-evaluation and could silently erase a freshly-saved token
+// before the startup() sequence could read it, causing the first login to fail.
+//
+// Call initSession() exactly ONCE from the root layout on cold start.
+// It is safe to call multiple times (idempotent).
+export function initSession(): void {
+  if (typeof window === "undefined" || typeof window.sessionStorage === "undefined") return;
+  // Only clear stale tokens on a fresh browser session (tab open), never mid-session.
   if (!window.sessionStorage.getItem("carbontracker_session_active")) {
-    try {
-      window.localStorage.removeItem(TOKEN_KEY);
-      window.localStorage.removeItem(REFRESH_TOKEN_KEY);
-      window.localStorage.removeItem(USER_KEY);
-      window.localStorage.removeItem(LOGIN_TS_KEY);
-    } catch (e) {
-      // ignore
-    }
-    try {
-      window.sessionStorage.removeItem(TOKEN_KEY);
-      window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
-      window.sessionStorage.removeItem(USER_KEY);
-      window.sessionStorage.removeItem(LOGIN_TS_KEY);
-    } catch (e) {
-      // ignore
-    }
-    try {
-      window.sessionStorage.setItem("carbontracker_session_active", "true");
-    } catch (e) {
-      // ignore
-    }
+    try { window.localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+    try { window.localStorage.removeItem(REFRESH_TOKEN_KEY); } catch { /* ignore */ }
+    try { window.localStorage.removeItem(USER_KEY); } catch { /* ignore */ }
+    try { window.localStorage.removeItem(LOGIN_TS_KEY); } catch { /* ignore */ }
+    // NOTE: We do NOT clear sessionStorage here. sessionStorage is already empty
+    // on a new tab/window, so clearing it is redundant and risks wiping a token
+    // that was saved during login on a navigate/remount cycle.
+    try { window.sessionStorage.setItem("carbontracker_session_active", "true"); } catch { /* ignore */ }
   }
 }
 

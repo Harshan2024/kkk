@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Shield, Users, Activity, Server, Database, Cpu, RefreshCw, AlertTriangle, CheckCircle, Clock, BarChart3 } from "lucide-react";
+import { getAuthorizationHeader } from "../../services/authService";
 
 interface ComponentStatus {
   status: string;
@@ -28,7 +29,7 @@ interface HealthDashboard {
   metrics: Record<string, number>;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://carbontracker-backend.onrender.com";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://kkk-harshan-sona.onrender.com";
 
 const INDICATOR_COLORS: Record<string, string> = {
   green:  "bg-emerald-500",
@@ -109,15 +110,11 @@ export default function AdminPage() {
 
   const fetchDashboard = async () => {
     try {
-      const token = typeof window !== "undefined"
-        ? (window.localStorage ? window.localStorage.getItem("carbon_access_token") : null) ||
-          (window.sessionStorage ? window.sessionStorage.getItem("carbon_access_token") : null) ||
-          (window.sessionStorage ? window.sessionStorage.getItem("carbontracker_token") : null) ||
-          (window.localStorage ? window.localStorage.getItem("carbontracker_token") : null)
-        : null;
+      // Use the centralized auth service — same token path as the rest of the app
+      const authHeader = getAuthorizationHeader();
 
       const res = await fetch(`${API_BASE}/api/v1/admin/health-dashboard`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: authHeader ? { Authorization: authHeader } : {},
       });
 
       if (!res.ok) {
